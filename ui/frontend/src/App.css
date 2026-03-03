@@ -1,0 +1,197 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0f0f0f;
+  color: #e0e0e0;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  color: #fff;
+}
+
+h2 {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+  margin-bottom: 14px;
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 6px;
+}
+
+/* Config */
+.config-section {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #bbb;
+}
+
+.field input {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  outline: none;
+  width: 100%;
+}
+
+.field input:focus {
+  border-color: #555;
+}
+
+.field small {
+  font-size: 11px;
+  color: #555;
+}
+
+.btn-save {
+  align-self: flex-start;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-save:hover {
+  background: #333;
+}
+
+/* Actions */
+.actions-section {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.action-card {
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.action-card p {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.btn-primary {
+  background: #1d6ed8;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  padding: 9px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+  align-self: flex-start;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2280f0;
+}
+
+.btn-primary:disabled {
+  background: #1a3a6a;
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* Log */
+.log-section {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.error {
+  background: #2a0a0a;
+  border: 1px solid #5a1a1a;
+  border-radius: 6px;
+  color: #ff6b6b;
+  padding: 10px 14px;
+  font-size: 12px;
+  margin-bottom: 12px;
+  font-family: monospace;
+}
+
+.log-box {
+  background: #0a0a0a;
+  border: 1px solid #222;
+  border-radius: 6px;
+  padding: 12px;
+  height: 260px;
+  overflow-y: auto;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+}
+
+.log-line {
+  color: #9cdcfe;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.log-done {
+  color: #4ec9b0;
+  line-height: 1.6;
+  font-weight: 600;
+}

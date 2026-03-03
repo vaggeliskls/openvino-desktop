@@ -1,3 +1,10 @@
 export/
 python/
 export-windows.zip
+ovms/
+uv.exe
+ui/assets/uv.exe
+ui/build/
+ui/assets
+dist
+node_modules

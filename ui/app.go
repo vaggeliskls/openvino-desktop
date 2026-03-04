@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/vaggeliskls/openvino-desk/ui/internal/setup"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -39,9 +40,21 @@ type Config struct {
 
 // StatusResult reports whether each component is ready.
 type StatusResult struct {
-	UvReady   bool `json:"uv_ready"`
-	DepsReady bool `json:"deps_ready"`
-	OvmsReady bool `json:"ovms_ready"`
+	UvReady     bool   `json:"uv_ready"`
+	DepsReady   bool   `json:"deps_ready"`
+	OvmsReady   bool   `json:"ovms_ready"`
+	OvmsVersion string `json:"ovms_version"`
+}
+
+// ovmsVersionFromURL extracts the version tag from an OVMS release URL.
+// e.g. ".../download/v2026.0/ovms_windows..." → "2026.0"
+func ovmsVersionFromURL(ovmsURL string) string {
+	for _, part := range strings.Split(ovmsURL, "/") {
+		if strings.HasPrefix(part, "v") && len(part) > 1 {
+			return part[1:]
+		}
+	}
+	return ""
 }
 
 // App is the Wails application struct.
@@ -140,9 +153,10 @@ func (a *App) CheckStatus() StatusResult {
 	_, ovmsErr := os.Stat(ovmsDir)
 
 	return StatusResult{
-		UvReady:   uvErr == nil,
-		DepsReady: depsErr == nil,
-		OvmsReady: ovmsErr == nil,
+		UvReady:     uvErr == nil,
+		DepsReady:   depsErr == nil,
+		OvmsReady:   ovmsErr == nil,
+		OvmsVersion: ovmsVersionFromURL(a.config.OvmsURL),
 	}
 }
 

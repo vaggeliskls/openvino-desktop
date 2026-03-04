@@ -48,6 +48,7 @@ export namespace main {
 	    uv_ready: boolean;
 	    deps_ready: boolean;
 	    ovms_ready: boolean;
+	    ovms_version: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new StatusResult(source);
@@ -58,6 +59,7 @@ export namespace main {
 	        this.uv_ready = source["uv_ready"];
 	        this.deps_ready = source["deps_ready"];
 	        this.ovms_ready = source["ovms_ready"];
+	        this.ovms_version = source["ovms_version"];
 	    }
 	}
 

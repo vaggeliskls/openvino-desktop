@@ -192,20 +192,15 @@ export default function App() {
             )
           })}
         </nav>
+        <div className="status-row header-status">
+          <StatusBadge ready={status.uv_ready && status.deps_ready} label="Export" />
+          <StatusBadge ready={status.ovms_ready} label={status.ovms_version ? `OVMS ${status.ovms_version}` : 'OVMS'} />
+        </div>
       </header>
 
       <main className="tab-content">
         {tab === 'dependencies' && (
           <div className="panel">
-            <div className="status-row">
-              <StatusBadge ready={status.uv_ready} label="uv" />
-              <StatusBadge ready={status.deps_ready} label="Export" />
-              <StatusBadge ready={status.ovms_ready} label="OVMS" />
-              <button className="btn-ghost" onClick={() => CheckStatus().then(setStatus)}>
-                Refresh
-              </button>
-            </div>
-
             <div className="action-grid">
               <div className="action-card">
                 <div className="action-card-body">

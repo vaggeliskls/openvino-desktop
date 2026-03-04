@@ -89,6 +89,11 @@ body {
   flex-wrap: wrap;
 }
 
+.header-status {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .status-badge {
   display: flex;
   align-items: center;

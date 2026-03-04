@@ -1,0 +1,31 @@
+name: Export Dependencies
+
+on:
+  push:
+    tags:
+      - "export*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies into target folder
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --target site-packages `
+            --extra-index-url https://download.pytorch.org/whl/cpu `
+            -r https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models/requirements.txt
+
+      - name: Zip dependencies
+        run: Compress-Archive -Path site-packages -DestinationPath ${{ github.ref_name }}-windows-x64.zip
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ github.ref_name }}-windows-x64.zip

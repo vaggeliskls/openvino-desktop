@@ -120,12 +120,12 @@ export default function App() {
 
   useEffect(() => {
     if (status.uv_ready && status.deps_ready && status.ovms_ready && tab === 'dependencies') {
-      setTab('export')
+      setTab('models')
     }
   }, [status])
 
   useEffect(() => {
-    if (tab === 'export' && status.uv_ready && status.deps_ready && status.ovms_ready) {
+    if (tab === 'models' && status.uv_ready && status.deps_ready && status.ovms_ready) {
       loadInstalledModels()
     }
   }, [tab, status])
@@ -250,16 +250,17 @@ export default function App() {
       <header className="app-header">
         <span className="app-title">OpenVINO Desktop</span>
         <nav className="tabs">
-          {['dependencies', 'models', 'export', 'settings'].map(t => {
+          {['dependencies', 'server', 'models', 'settings'].map(t => {
             if (t === 'dependencies' && allReady) return null
-            const locked = !allReady && (t === 'models' || t === 'export')
+            const locked = !allReady && (t === 'server' || t === 'models')
+            const label = t === 'server' ? 'Models Server' : t.charAt(0).toUpperCase() + t.slice(1)
             return (
               <button
                 key={t}
                 className={`tab ${tab === t ? 'active' : ''} ${locked ? 'tab-locked' : ''}`}
                 onClick={() => setTab(t)}
               >
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+                {label}
                 {locked && <span className="tab-lock-icon">🔒</span>}
               </button>
             )
@@ -310,7 +311,7 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'models' && (
+        {tab === 'server' && (
           <div className="panel">
             {!allReady
               ? <NotReady onGo={() => setTab('dependencies')} />
@@ -356,7 +357,7 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'export' && (
+        {tab === 'models' && (
           <div className="panel">
             {!allReady
               ? <NotReady onGo={() => setTab('dependencies')} />
@@ -494,15 +495,8 @@ export default function App() {
                                 run(() => PullModel(selectedModel))
                               } else {
                                 const tag = selectedModelInfo?.pipeline_tag
-                                const processedOpts = { ...exportOpts }
-                                if (tag === 'text-generation') {
-                                  processedOpts.cache = parseInt(processedOpts.cache) || 2
-                                  processedOpts.max_num_batched_tokens = parseInt(processedOpts.max_num_batched_tokens) || 2048
-                                  processedOpts.max_num_seqs = parseInt(processedOpts.max_num_seqs) || 8
-                                  processedOpts.enable_prefix_caching = processedOpts.enable_prefix_caching === 'true' || processedOpts.enable_prefix_caching === true
-                                }
-                                if (tag === 'text-generation') run(() => ExportTextGen(selectedModel, processedOpts))
-                                else if (tag === 'feature-extraction') run(() => ExportEmbeddings(selectedModel, processedOpts))
+                                if (tag === 'text-generation') run(() => ExportTextGen(selectedModel, exportOpts))
+                                else if (tag === 'feature-extraction') run(() => ExportEmbeddings(selectedModel, exportOpts))
                               }
                             }}
                           >

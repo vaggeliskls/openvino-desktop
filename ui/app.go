@@ -33,25 +33,6 @@ const (
 var defaultSearchTags = []string{"OpenVINO", "Qwen", "Embedding"}
 var defaultPipelineFilters = []string{"text-generation", "feature-extraction"}
 
-// TextGenExportConfig holds export options for text-generation models.
-type TextGenExportConfig struct {
-	TargetDevice        string `json:"target_device"`
-	Cache               int    `json:"cache"`
-	KvCachePrecision    string `json:"kv_cache_precision"`
-	EnablePrefixCaching bool   `json:"enable_prefix_caching"`
-	ReasoningParser     string `json:"reasoning_parser"`
-	ToolParser          string `json:"tool_parser"`
-	MaxBatchedTokens    int    `json:"max_num_batched_tokens"`
-	MaxNumSeqs          int    `json:"max_num_seqs"`
-}
-
-// EmbeddingsExportConfig holds export options for embedding models.
-type EmbeddingsExportConfig struct {
-	TargetDevice            string `json:"target_device"`
-	WeightFormat            string `json:"weight_format"`
-	ExtraQuantizationParams string `json:"extra_quantization_params"`
-}
-
 type Config struct {
 	InstallDir       string                 `json:"install_dir"`
 	UvURL            string                 `json:"uv_url"`
@@ -60,8 +41,8 @@ type Config struct {
 	SearchTags       []string               `json:"search_tags"`
 	PipelineFilters  []string               `json:"pipeline_filters"`
 	SearchLimit      int                    `json:"search_limit"`
-	TextGenExport    TextGenExportConfig    `json:"text_gen_export"`
-	EmbeddingsExport EmbeddingsExportConfig `json:"embeddings_export"`
+	TextGenExport    map[string]interface{} `json:"text_gen_export"`   // Flexible export options for text-generation
+	EmbeddingsExport map[string]interface{} `json:"embeddings_export"` // Flexible export options for embeddings
 }
 
 // StatusResult reports whether each component is ready.
@@ -120,18 +101,18 @@ func defaultConfig() Config {
 		SearchTags:      defaultSearchTags,
 		PipelineFilters: defaultPipelineFilters,
 		SearchLimit:     30,
-		TextGenExport: TextGenExportConfig{
-			TargetDevice:        "GPU",
-			Cache:               2,
-			KvCachePrecision:    "u8",
-			EnablePrefixCaching: true,
-			MaxBatchedTokens:    2048,
-			MaxNumSeqs:          8,
+		TextGenExport: map[string]interface{}{
+			"target_device":          "GPU",
+			"cache":                  2,
+			"kv_cache_precision":     "u8",
+			"enable_prefix_caching":  true,
+			"max_num_batched_tokens": 2048,
+			"max_num_seqs":           8,
 		},
-		EmbeddingsExport: EmbeddingsExportConfig{
-			TargetDevice:            "CPU",
-			WeightFormat:            "fp16",
-			ExtraQuantizationParams: "--library sentence_transformers",
+		EmbeddingsExport: map[string]interface{}{
+			"target_device":             "CPU",
+			"weight_format":             "fp16",
+			"extra_quantization_params": "--library sentence_transformers",
 		},
 	}
 }
@@ -162,28 +143,24 @@ func (a *App) loadConfig() {
 	if a.config.SearchLimit == 0 {
 		a.config.SearchLimit = 30
 	}
-	tg := &a.config.TextGenExport
-	if tg.TargetDevice == "" {
-		tg.TargetDevice = "GPU"
+	// Apply defaults for text_gen_export if empty
+	if len(a.config.TextGenExport) == 0 {
+		a.config.TextGenExport = map[string]interface{}{
+			"target_device":          "GPU",
+			"cache":                  2,
+			"kv_cache_precision":     "u8",
+			"enable_prefix_caching":  true,
+			"max_num_batched_tokens": 2048,
+			"max_num_seqs":           8,
+		}
 	}
-	if tg.Cache == 0 {
-		tg.Cache = 2
-	}
-	if tg.KvCachePrecision == "" {
-		tg.KvCachePrecision = "u8"
-	}
-	if tg.MaxBatchedTokens == 0 {
-		tg.MaxBatchedTokens = 2048
-	}
-	if tg.MaxNumSeqs == 0 {
-		tg.MaxNumSeqs = 8
-	}
-	emb := &a.config.EmbeddingsExport
-	if emb.TargetDevice == "" {
-		emb.TargetDevice = "CPU"
-	}
-	if emb.WeightFormat == "" {
-		emb.WeightFormat = "fp16"
+	// Apply defaults for embeddings_export if empty
+	if len(a.config.EmbeddingsExport) == 0 {
+		a.config.EmbeddingsExport = map[string]interface{}{
+			"target_device":             "CPU",
+			"weight_format":             "fp16",
+			"extra_quantization_params": "--library sentence_transformers",
+		}
 	}
 }
 
@@ -327,13 +304,66 @@ func (a *App) PullModel(modelID string) error {
 	if modelID == "" {
 		return fmt.Errorf("no model selected")
 	}
-	venvPython := filepath.Join(a.config.InstallDir, "export", "Scripts", "python.exe")
-	destDir := filepath.Join(a.config.InstallDir, "models", modelID)
-	script := fmt.Sprintf(
-		"from huggingface_hub import snapshot_download; snapshot_download(%q, local_dir=%q)",
-		modelID, destDir,
+
+	ovmsDir := filepath.Join(a.config.InstallDir, "ovms")
+	ovmsExe := filepath.Join(ovmsDir, "ovms.exe")
+
+	if _, err := os.Stat(ovmsExe); err != nil {
+		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
+	}
+
+	modelsDir := filepath.Join(a.config.InstallDir, "models")
+	os.MkdirAll(modelsDir, 0755) //nolint: errcheck
+
+	// Use OVMS CLI to pull the model
+	// ovms --pull --source_model <model> --model_repository_path <path> --model_name <name>
+	cmd := exec.Command(ovmsExe,
+		"--pull",
+		"--source_model", modelID,
+		"--model_repository_path", modelsDir,
+		"--model_name", modelID,
 	)
-	return setup.RunScript(a.config.InstallDir, a.emit, venvPython, "-c", script)
+	cmd.Dir = ovmsDir
+	cmd.Env = buildOVMSEnv(ovmsDir)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line != "" {
+				runtime.EventsEmit(a.ctx, "log", line)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line != "" {
+				runtime.EventsEmit(a.ctx, "log", line)
+			}
+		}
+	}()
+	wg.Wait()
+
+	return cmd.Wait()
 }
 
 // venvEnv returns os.Environ() with the venv Scripts directory prepended to PATH,
@@ -353,7 +383,7 @@ func (a *App) venvEnv() []string {
 }
 
 // ExportTextGen exports a text-generation model using export_model.py text_generation.
-func (a *App) ExportTextGen(modelID string, opts TextGenExportConfig) error {
+func (a *App) ExportTextGen(modelID string, opts map[string]interface{}) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
@@ -368,30 +398,23 @@ func (a *App) ExportTextGen(modelID string, opts TextGenExportConfig) error {
 		"--source_model", modelID,
 		"--model_name", modelID,
 		"--model_repository_path", modelsDir,
-		"--target_device", opts.TargetDevice,
-		"--cache", strconv.Itoa(opts.Cache),
-		"--kv_cache_precision", opts.KvCachePrecision,
-		"--max_num_batched_tokens", strconv.Itoa(opts.MaxBatchedTokens),
-		"--max_num_seqs", strconv.Itoa(opts.MaxNumSeqs),
 	}
-	if opts.EnablePrefixCaching {
-		args = append(args, "--enable_prefix_caching")
-	}
-	if opts.ReasoningParser != "" {
-		args = append(args, "--reasoning_parser", opts.ReasoningParser)
-	}
-	if opts.ToolParser != "" {
-		args = append(args, "--tool_parser", opts.ToolParser)
-	}
+
+	// Add options dynamically from the map
+	args = a.buildExportArgs(args, opts)
+
 	if err := setup.RunScriptEnv(a.config.InstallDir, a.venvEnv(), a.emit, venvPython, args...); err != nil {
 		return err
 	}
 	// Update config.json with target_device after export completes
-	return a.updateModelTargetDevice(modelID, opts.TargetDevice)
+	if targetDevice, ok := opts["target_device"].(string); ok {
+		return a.updateModelTargetDevice(modelID, targetDevice)
+	}
+	return nil
 }
 
 // ExportEmbeddings exports an embeddings model using export_model.py embeddings_ov.
-func (a *App) ExportEmbeddings(modelID string, opts EmbeddingsExportConfig) error {
+func (a *App) ExportEmbeddings(modelID string, opts map[string]interface{}) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
@@ -406,17 +429,43 @@ func (a *App) ExportEmbeddings(modelID string, opts EmbeddingsExportConfig) erro
 		"--source_model", modelID,
 		"--model_name", modelID,
 		"--model_repository_path", modelsDir,
-		"--target_device", opts.TargetDevice,
-		"--weight-format", opts.WeightFormat,
 	}
-	if opts.ExtraQuantizationParams != "" {
-		args = append(args, "--extra_quantization_params", opts.ExtraQuantizationParams)
-	}
+
+	// Add options dynamically from the map
+	args = a.buildExportArgs(args, opts)
+
 	if err := setup.RunScriptEnv(a.config.InstallDir, a.venvEnv(), a.emit, venvPython, args...); err != nil {
 		return err
 	}
 	// Update config.json with target_device after export completes
-	return a.updateModelTargetDevice(modelID, opts.TargetDevice)
+	if targetDevice, ok := opts["target_device"].(string); ok {
+		return a.updateModelTargetDevice(modelID, targetDevice)
+	}
+	return nil
+}
+
+// buildExportArgs converts a map of options to command-line arguments.
+func (a *App) buildExportArgs(baseArgs []string, opts map[string]interface{}) []string {
+	args := baseArgs
+	for key, value := range opts {
+		switch v := value.(type) {
+		case bool:
+			if v {
+				args = append(args, "--"+key)
+			}
+		case int:
+			args = append(args, "--"+key, strconv.Itoa(v))
+		case float64:
+			args = append(args, "--"+key, strconv.Itoa(int(v)))
+		case string:
+			if v != "" {
+				args = append(args, "--"+key, v)
+			}
+		default:
+			// Skip unknown types
+		}
+	}
+	return args
 }
 
 // updateModelTargetDevice updates the target_device field for a model in config.json.
@@ -704,7 +753,16 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 		return fmt.Errorf("model %q not found in config.json", modelName)
 	}
 
-	// Update config.json
+	// Delete model directory first (convert Windows path separator if needed)
+	modelPath = filepath.FromSlash(strings.ReplaceAll(modelPath, "\\", "/"))
+	if !filepath.IsAbs(modelPath) {
+		modelPath = filepath.Join(a.config.InstallDir, modelPath)
+	}
+	if err := os.RemoveAll(modelPath); err != nil {
+		return fmt.Errorf("remove model directory: %w", err)
+	}
+
+	// Update config.json after successful deletion
 	ovmsConfig.ModelConfigList = newList
 	updatedData, err := json.MarshalIndent(ovmsConfig, "", "  ")
 	if err != nil {
@@ -712,15 +770,6 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 	}
 	if err := os.WriteFile(configPath, updatedData, 0644); err != nil {
 		return fmt.Errorf("write config.json: %w", err)
-	}
-
-	// Delete model directory (convert Windows path separator if needed)
-	modelPath = filepath.FromSlash(strings.ReplaceAll(modelPath, "\\", "/"))
-	if !filepath.IsAbs(modelPath) {
-		modelPath = filepath.Join(a.config.InstallDir, modelPath)
-	}
-	if err := os.RemoveAll(modelPath); err != nil {
-		return fmt.Errorf("remove model directory: %w", err)
 	}
 
 	return nil

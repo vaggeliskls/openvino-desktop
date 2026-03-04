@@ -3,11 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,12 +19,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-//go:embed assets
-var setupAssets embed.FS
-
 const (
-	defaultUvURL   = "https://github.com/astral-sh/uv/releases/download/0.10.8/uv-x86_64-pc-windows-msvc.zip"
-	defaultOvmsURL = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.0/ovms_windows_python_on.zip"
+	defaultOvmsURL               = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.0/ovms_windows_python_on.zip"
+	defaultExportRequirementsURL = "https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models/requirements.txt"
 )
 
 // Config holds user-configurable settings.
@@ -34,20 +29,19 @@ var defaultSearchTags = []string{"OpenVINO", "Qwen", "Embedding"}
 var defaultPipelineFilters = []string{"text-generation", "feature-extraction"}
 
 type Config struct {
-	InstallDir       string                 `json:"install_dir"`
-	UvURL            string                 `json:"uv_url"`
-	OvmsURL          string                 `json:"ovms_url"`
-	StartupSet       bool                   `json:"startup_set"` // true once the startup preference has been written
-	SearchTags       []string               `json:"search_tags"`
-	PipelineFilters  []string               `json:"pipeline_filters"`
-	SearchLimit      int                    `json:"search_limit"`
-	TextGenExport    map[string]interface{} `json:"text_gen_export"`   // Flexible export options for text-generation
-	EmbeddingsExport map[string]interface{} `json:"embeddings_export"` // Flexible export options for embeddings
+	InstallDir             string   `json:"install_dir"`
+	OvmsURL                string   `json:"ovms_url"`
+	ExportRequirementsURL  string   `json:"export_requirements_url"`
+	StartupSet             bool     `json:"startup_set"`
+	SearchTags             []string `json:"search_tags"`
+	PipelineFilters        []string `json:"pipeline_filters"`
+	SearchLimit            int      `json:"search_limit"`
+	TextGenTargetDevice    string   `json:"text_gen_target_device"`
+	EmbeddingsTargetDevice string   `json:"embeddings_target_device"`
 }
 
 // StatusResult reports whether each component is ready.
 type StatusResult struct {
-	UvReady     bool   `json:"uv_ready"`
 	DepsReady   bool   `json:"deps_ready"`
 	OvmsReady   bool   `json:"ovms_ready"`
 	OvmsVersion string `json:"ovms_version"`
@@ -95,25 +89,14 @@ func configPath() string {
 func defaultConfig() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
-		InstallDir:      filepath.Join(home, "openvino-desk"),
-		UvURL:           defaultUvURL,
-		OvmsURL:         defaultOvmsURL,
-		SearchTags:      defaultSearchTags,
-		PipelineFilters: defaultPipelineFilters,
-		SearchLimit:     30,
-		TextGenExport: map[string]interface{}{
-			"target_device":          "GPU",
-			"cache":                  2,
-			"kv_cache_precision":     "u8",
-			"enable_prefix_caching":  true,
-			"max_num_batched_tokens": 2048,
-			"max_num_seqs":           8,
-		},
-		EmbeddingsExport: map[string]interface{}{
-			"target_device":             "CPU",
-			"weight_format":             "fp16",
-			"extra_quantization_params": "--library sentence_transformers",
-		},
+		InstallDir:             filepath.Join(home, "openvino-desk"),
+		OvmsURL:                defaultOvmsURL,
+		ExportRequirementsURL:  defaultExportRequirementsURL,
+		SearchTags:             defaultSearchTags,
+		PipelineFilters:        defaultPipelineFilters,
+		SearchLimit:            30,
+		TextGenTargetDevice:    "GPU",
+		EmbeddingsTargetDevice: "CPU",
 	}
 }
 
@@ -127,12 +110,11 @@ func (a *App) loadConfig() {
 		a.config = defaultConfig()
 		return
 	}
-	// Fill in URL defaults for older configs that predate these fields.
-	if a.config.UvURL == "" {
-		a.config.UvURL = defaultUvURL
-	}
 	if a.config.OvmsURL == "" {
 		a.config.OvmsURL = defaultOvmsURL
+	}
+	if a.config.ExportRequirementsURL == "" {
+		a.config.ExportRequirementsURL = defaultExportRequirementsURL
 	}
 	if len(a.config.SearchTags) == 0 {
 		a.config.SearchTags = defaultSearchTags
@@ -143,24 +125,11 @@ func (a *App) loadConfig() {
 	if a.config.SearchLimit == 0 {
 		a.config.SearchLimit = 30
 	}
-	// Apply defaults for text_gen_export if empty
-	if len(a.config.TextGenExport) == 0 {
-		a.config.TextGenExport = map[string]interface{}{
-			"target_device":          "GPU",
-			"cache":                  2,
-			"kv_cache_precision":     "u8",
-			"enable_prefix_caching":  true,
-			"max_num_batched_tokens": 2048,
-			"max_num_seqs":           8,
-		}
+	if a.config.TextGenTargetDevice == "" {
+		a.config.TextGenTargetDevice = "GPU"
 	}
-	// Apply defaults for embeddings_export if empty
-	if len(a.config.EmbeddingsExport) == 0 {
-		a.config.EmbeddingsExport = map[string]interface{}{
-			"target_device":             "CPU",
-			"weight_format":             "fp16",
-			"extra_quantization_params": "--library sentence_transformers",
-		}
+	if a.config.EmbeddingsTargetDevice == "" {
+		a.config.EmbeddingsTargetDevice = "CPU"
 	}
 }
 
@@ -183,64 +152,39 @@ func (a *App) SaveConfig(config Config) error {
 	return os.WriteFile(configPath(), data, 0644)
 }
 
-// CheckStatus reports whether uv, the export venv, and OVMS are present.
+// CheckStatus reports whether the export deps and OVMS are present.
 func (a *App) CheckStatus() StatusResult {
-	uvBin := filepath.Join(a.config.InstallDir, "uv.exe")
-	venvPython := filepath.Join(a.config.InstallDir, "export", "Scripts", "python.exe")
-	ovmsDir := filepath.Join(a.config.InstallDir, "ovms")
+	marker := filepath.Join(a.config.InstallDir, ".deps-ready")
+	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
 
-	_, uvErr := os.Stat(uvBin)
-	_, depsErr := os.Stat(venvPython)
-	_, ovmsErr := os.Stat(ovmsDir)
+	_, depsErr := os.Stat(marker)
+	_, ovmsErr := os.Stat(ovmsDirPath)
 
 	return StatusResult{
-		UvReady:     uvErr == nil,
 		DepsReady:   depsErr == nil,
 		OvmsReady:   ovmsErr == nil,
 		OvmsVersion: ovmsVersionFromURL(a.config.OvmsURL),
 	}
 }
 
-// extractAssets writes embedded assets (requirements, scripts) to installDir,
-// skipping uv.exe which is downloaded from the configured URL instead.
-func (a *App) extractAssets() error {
-	return fs.WalkDir(setupAssets, "assets", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && filepath.Base(path) == "uv.exe" {
-			return nil // uv is downloaded from URL, not embedded
-		}
-		rel, _ := filepath.Rel("assets", path)
-		dest := filepath.Join(a.config.InstallDir, rel)
-		if d.IsDir() {
-			return os.MkdirAll(dest, 0755)
-		}
-		data, err := setupAssets.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dest, data, 0755)
-	})
-}
-
 func (a *App) emit(line string) {
 	runtime.EventsEmit(a.ctx, "log", line)
 }
 
-// PrepareExport extracts bundled assets, downloads uv, then sets up the Python environment.
+// PrepareExport installs ML requirements using the OVMS bundled Python.
+// OVMS must be ready before calling this.
 func (a *App) PrepareExport() error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
-	if a.config.UvURL == "" {
-		return fmt.Errorf("uv download URL is not configured")
+	if a.config.ExportRequirementsURL == "" {
+		return fmt.Errorf("export requirements URL is not configured")
 	}
-	a.emit("Extracting bundled assets...")
-	if err := a.extractAssets(); err != nil {
-		return fmt.Errorf("extract assets: %w", err)
+	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
+	if _, err := os.Stat(ovmsDirPath); err != nil {
+		return fmt.Errorf("OVMS is not installed — prepare OVMS first")
 	}
-	return setup.PrepareExport(a.config.InstallDir, a.config.UvURL, a.emit)
+	return setup.PrepareExport(a.config.InstallDir, a.config.ExportRequirementsURL, a.emit)
 }
 
 // HFModel is a minimal representation of a Hugging Face model search result.
@@ -269,8 +213,6 @@ func hfGet(endpoint string) ([]HFModel, error) {
 }
 
 // SearchModels queries the Hugging Face API with the given pipeline filters.
-// Pass an empty slice to search without any pipeline restriction.
-// One request is made per filter and results are merged/deduplicated.
 func (a *App) SearchModels(query string, filters []string) ([]HFModel, error) {
 	base := fmt.Sprintf("https://huggingface.co/api/models?limit=%d&sort=downloads&direction=-1", a.config.SearchLimit)
 	if query != "" {
@@ -296,8 +238,8 @@ func (a *App) SearchModels(query string, filters []string) ([]HFModel, error) {
 	return merged, nil
 }
 
-// PullModel downloads an OpenVINO model from Hugging Face using huggingface_hub.
-func (a *App) PullModel(modelID string) error {
+// PullModel downloads an OpenVINO model from Hugging Face using OVMS --pull.
+func (a *App) PullModel(modelID, targetDevice string) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
@@ -305,8 +247,8 @@ func (a *App) PullModel(modelID string) error {
 		return fmt.Errorf("no model selected")
 	}
 
-	ovmsDir := filepath.Join(a.config.InstallDir, "ovms")
-	ovmsExe := filepath.Join(ovmsDir, "ovms.exe")
+	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
+	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
 
 	if _, err := os.Stat(ovmsExe); err != nil {
 		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
@@ -315,17 +257,94 @@ func (a *App) PullModel(modelID string) error {
 	modelsDir := filepath.Join(a.config.InstallDir, "models")
 	os.MkdirAll(modelsDir, 0755) //nolint: errcheck
 
-	// Use OVMS CLI to pull the model
-	// ovms --pull --source_model <model> --model_repository_path <path> --model_name <name>
-	cmd := exec.Command(ovmsExe,
+	configPath := filepath.Join(a.config.InstallDir, "config.json")
+	args := []string{
 		"--pull",
 		"--source_model", modelID,
 		"--model_repository_path", modelsDir,
 		"--model_name", modelID,
-	)
-	cmd.Dir = ovmsDir
-	cmd.Env = buildOVMSEnv(ovmsDir)
+		"--config_path", configPath,
+		"--add_to_config",
+	}
+	if targetDevice != "" {
+		args = append(args, "--target_device", targetDevice)
+	}
 
+	cmd := exec.Command(ovmsExe, args...)
+	cmd.Dir = ovmsDirPath
+	cmd.Env = buildOVMSEnv(ovmsDirPath)
+
+	return a.streamCmd(cmd)
+}
+
+// ExportTextGen exports a text-generation model using ovms --pull --task text_generation.
+func (a *App) ExportTextGen(modelID, targetDevice string, extraOpts map[string]interface{}) error {
+	return a.ovmsPullTask(modelID, "text_generation", targetDevice, extraOpts)
+}
+
+// ExportEmbeddings exports an embeddings model using ovms --pull --task embeddings.
+func (a *App) ExportEmbeddings(modelID, targetDevice string, extraOpts map[string]interface{}) error {
+	return a.ovmsPullTask(modelID, "embeddings", targetDevice, extraOpts)
+}
+
+func (a *App) ovmsPullTask(modelID, task, targetDevice string, extraOpts map[string]interface{}) error {
+	if a.config.InstallDir == "" {
+		return fmt.Errorf("install directory is not configured")
+	}
+	if modelID == "" {
+		return fmt.Errorf("no model selected")
+	}
+
+	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
+	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
+	if _, err := os.Stat(ovmsExe); err != nil {
+		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
+	}
+
+	modelsDir := filepath.Join(a.config.InstallDir, "models")
+	os.MkdirAll(modelsDir, 0755) //nolint: errcheck
+
+	args := []string{
+		"--pull",
+		"--task", task,
+		"--source_model", modelID,
+		"--model_repository_path", modelsDir,
+		"--model_name", modelID,
+	}
+	if targetDevice != "" {
+		args = append(args, "--target_device", targetDevice)
+	}
+	for k, v := range extraOpts {
+		switch val := v.(type) {
+		case bool:
+			if val {
+				args = append(args, "--"+k)
+			}
+		case string:
+			if val != "" {
+				args = append(args, "--"+k, val)
+			}
+		case float64:
+			args = append(args, "--"+k, strconv.FormatFloat(val, 'f', -1, 64))
+		}
+	}
+
+	a.emit("$ " + ovmsExe + " " + strings.Join(args, " "))
+
+	cmd := exec.Command(ovmsExe, args...)
+	cmd.Dir = ovmsDirPath
+	cmd.Env = buildOVMSEnv(ovmsDirPath)
+
+	if err := a.streamCmd(cmd); err != nil {
+		return err
+	}
+	if targetDevice != "" {
+		return a.updateModelTargetDevice(modelID, targetDevice)
+	}
+	return nil
+}
+
+func (a *App) streamCmd(cmd *exec.Cmd) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -334,146 +353,57 @@ func (a *App) PullModel(modelID string) error {
 	if err != nil {
 		return err
 	}
-
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line != "" {
-				runtime.EventsEmit(a.ctx, "log", line)
-			}
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line != "" {
-				runtime.EventsEmit(a.ctx, "log", line)
-			}
-		}
-	}()
+	go func() { defer wg.Done(); a.streamLogReader(stdout) }()
+	go func() { defer wg.Done(); a.streamLogReader(stderr) }()
 	wg.Wait()
-
 	return cmd.Wait()
 }
 
-// venvEnv returns os.Environ() with the venv Scripts directory prepended to PATH,
-// so that subprocesses spawned by export_model.py (e.g. optimum-cli) can be found.
-func (a *App) venvEnv() []string {
-	scriptsDir := filepath.Join(a.config.InstallDir, "export", "Scripts")
-	base := os.Environ()
-	result := make([]string, 0, len(base))
-	for _, e := range base {
-		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
-			result = append(result, "PATH="+scriptsDir+";"+e[5:])
-		} else {
-			result = append(result, e)
+// streamLogReader reads from r in small chunks, splitting on \n and \r so that
+// carriage-return progress updates (e.g. huggingface_hub download bars) are
+// emitted as individual log lines in real time instead of waiting for \n.
+func (a *App) streamLogReader(r io.Reader) {
+	buf := make([]byte, 4096)
+	var partial string
+	emit := func(line string) {
+		if line = strings.TrimSpace(line); line != "" {
+			runtime.EventsEmit(a.ctx, "log", line)
 		}
 	}
-	return result
-}
-
-// ExportTextGen exports a text-generation model using export_model.py text_generation.
-func (a *App) ExportTextGen(modelID string, opts map[string]interface{}) error {
-	if a.config.InstallDir == "" {
-		return fmt.Errorf("install directory is not configured")
-	}
-	if modelID == "" {
-		return fmt.Errorf("no model selected")
-	}
-	venvPython := filepath.Join(a.config.InstallDir, "export", "Scripts", "python.exe")
-	scriptPath := filepath.Join(a.config.InstallDir, "export-model-requirements", "export_model.py")
-	modelsDir := filepath.Join(a.config.InstallDir, "models")
-	args := []string{
-		scriptPath, "text_generation",
-		"--source_model", modelID,
-		"--model_name", modelID,
-		"--model_repository_path", modelsDir,
-	}
-
-	// Add options dynamically from the map
-	args = a.buildExportArgs(args, opts)
-
-	if err := setup.RunScriptEnv(a.config.InstallDir, a.venvEnv(), a.emit, venvPython, args...); err != nil {
-		return err
-	}
-	// Update config.json with target_device after export completes
-	if targetDevice, ok := opts["target_device"].(string); ok {
-		return a.updateModelTargetDevice(modelID, targetDevice)
-	}
-	return nil
-}
-
-// ExportEmbeddings exports an embeddings model using export_model.py embeddings_ov.
-func (a *App) ExportEmbeddings(modelID string, opts map[string]interface{}) error {
-	if a.config.InstallDir == "" {
-		return fmt.Errorf("install directory is not configured")
-	}
-	if modelID == "" {
-		return fmt.Errorf("no model selected")
-	}
-	venvPython := filepath.Join(a.config.InstallDir, "export", "Scripts", "python.exe")
-	scriptPath := filepath.Join(a.config.InstallDir, "export-model-requirements", "export_model.py")
-	modelsDir := filepath.Join(a.config.InstallDir, "models")
-	args := []string{
-		scriptPath, "embeddings_ov",
-		"--source_model", modelID,
-		"--model_name", modelID,
-		"--model_repository_path", modelsDir,
-	}
-
-	// Add options dynamically from the map
-	args = a.buildExportArgs(args, opts)
-
-	if err := setup.RunScriptEnv(a.config.InstallDir, a.venvEnv(), a.emit, venvPython, args...); err != nil {
-		return err
-	}
-	// Update config.json with target_device after export completes
-	if targetDevice, ok := opts["target_device"].(string); ok {
-		return a.updateModelTargetDevice(modelID, targetDevice)
-	}
-	return nil
-}
-
-// buildExportArgs converts a map of options to command-line arguments.
-func (a *App) buildExportArgs(baseArgs []string, opts map[string]interface{}) []string {
-	args := baseArgs
-	for key, value := range opts {
-		switch v := value.(type) {
-		case bool:
-			if v {
-				args = append(args, "--"+key)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			partial += string(buf[:n])
+			for {
+				idx := strings.IndexAny(partial, "\n\r")
+				if idx < 0 {
+					break
+				}
+				emit(partial[:idx])
+				partial = partial[idx+1:]
+				// skip the \n of a \r\n pair
+				if len(partial) > 0 && partial[0] == '\n' {
+					partial = partial[1:]
+				}
 			}
-		case int:
-			args = append(args, "--"+key, strconv.Itoa(v))
-		case float64:
-			args = append(args, "--"+key, strconv.Itoa(int(v)))
-		case string:
-			if v != "" {
-				args = append(args, "--"+key, v)
-			}
-		default:
-			// Skip unknown types
+		}
+		if err != nil {
+			emit(partial)
+			break
 		}
 	}
-	return args
 }
 
 // updateModelTargetDevice updates the target_device field for a model in config.json.
 func (a *App) updateModelTargetDevice(modelName, targetDevice string) error {
-	configPath := filepath.Join(a.config.InstallDir, "config.json")
-	data, err := os.ReadFile(configPath)
+	cfgPath := filepath.Join(a.config.InstallDir, "config.json")
+	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		// If config doesn't exist yet, that's ok - it will be created by OVMS
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -485,7 +415,6 @@ func (a *App) updateModelTargetDevice(modelName, targetDevice string) error {
 		return fmt.Errorf("parse config.json: %w", err)
 	}
 
-	// Find and update the model's target_device
 	updated := false
 	for i := range ovmsConfig.ModelConfigList {
 		if ovmsConfig.ModelConfigList[i].Config.Name == modelName {
@@ -494,43 +423,30 @@ func (a *App) updateModelTargetDevice(modelName, targetDevice string) error {
 			break
 		}
 	}
-
 	if !updated {
-		// Model not found in config yet - this is normal, will be added later
 		return nil
 	}
 
-	// Write updated config
 	updatedData, err := json.MarshalIndent(ovmsConfig, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config.json: %w", err)
 	}
-	if err := os.WriteFile(configPath, updatedData, 0644); err != nil {
-		return fmt.Errorf("write config.json: %w", err)
-	}
-
-	return nil
+	return os.WriteFile(cfgPath, updatedData, 0644)
 }
 
-// ResetExport removes the uv binary, Python installation and export venv.
+// ResetExport removes the deps-ready marker so PrepareExport will re-run.
 func (a *App) ResetExport() error {
-	dirs := []string{
-		filepath.Join(a.config.InstallDir, "uv.exe"),
-		filepath.Join(a.config.InstallDir, "python"),
-		filepath.Join(a.config.InstallDir, "export"),
-	}
-	for _, d := range dirs {
-		if err := os.RemoveAll(d); err != nil {
-			return fmt.Errorf("remove %s: %w", d, err)
-		}
+	marker := filepath.Join(a.config.InstallDir, ".deps-ready")
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove marker: %w", err)
 	}
 	return nil
 }
 
 // ResetOVMS removes the OVMS server directory.
 func (a *App) ResetOVMS() error {
-	ovmsDir := filepath.Join(a.config.InstallDir, "ovms")
-	if err := os.RemoveAll(ovmsDir); err != nil {
+	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
+	if err := os.RemoveAll(ovmsDirPath); err != nil {
 		return fmt.Errorf("remove ovms: %w", err)
 	}
 	return nil
@@ -547,8 +463,7 @@ func (a *App) PrepareOVMS() error {
 	return setup.PrepareOVMS(a.config.InstallDir, a.config.OvmsURL, a.emit)
 }
 
-// buildOVMSEnv constructs the process environment for running ovms.exe,
-// replicating what setupvars.ps1 does (sets OVMS_DIR, PYTHONHOME, prepends PATH).
+// buildOVMSEnv constructs the process environment for running ovms.exe.
 func buildOVMSEnv(ovmsDir string) []string {
 	var prepend []string
 	pythonDir := filepath.Join(ovmsDir, "python")
@@ -581,15 +496,13 @@ func (a *App) emitServerLog(line string) {
 func (a *App) streamReader(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
+		if line := scanner.Text(); line != "" {
 			a.emitServerLog(line)
 		}
 	}
 }
 
-// StartOVMS sources setupvars.ps1 env and starts the OVMS server process,
-// streaming its output via "server-log" events.
+// StartOVMS starts the OVMS server process, streaming its output via "server-log" events.
 func (a *App) StartOVMS() error {
 	a.ovmsMu.Lock()
 	defer a.ovmsMu.Unlock()
@@ -598,9 +511,9 @@ func (a *App) StartOVMS() error {
 		return fmt.Errorf("OVMS server is already running")
 	}
 
-	ovmsDir := filepath.Join(a.config.InstallDir, "ovms")
-	ovmsExe := filepath.Join(ovmsDir, "ovms.exe")
-	ovmsConfig := filepath.Join(a.config.InstallDir, "config.json")
+	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
+	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
+	ovmsCfg := filepath.Join(a.config.InstallDir, "config.json")
 	if _, err := os.Stat(ovmsExe); err != nil {
 		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
 	}
@@ -608,9 +521,9 @@ func (a *App) StartOVMS() error {
 	modelsDir := filepath.Join(a.config.InstallDir, "models")
 	os.MkdirAll(modelsDir, 0755) //nolint: errcheck
 
-	cmd := exec.Command(ovmsExe, "--port", "9000", "--rest_port", "8080", "--config_path", ovmsConfig)
-	cmd.Dir = ovmsDir
-	cmd.Env = buildOVMSEnv(ovmsDir)
+	cmd := exec.Command(ovmsExe, "--port", "9000", "--rest_port", "8080", "--config_path", ovmsCfg)
+	cmd.Dir = ovmsDirPath
+	cmd.Env = buildOVMSEnv(ovmsDirPath)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -687,8 +600,8 @@ type OVMSConfig struct {
 
 // GetInstalledModels returns the list of models from config.json.
 func (a *App) GetInstalledModels() ([]ModelInfo, error) {
-	configPath := filepath.Join(a.config.InstallDir, "config.json")
-	data, err := os.ReadFile(configPath)
+	cfgPath := filepath.Join(a.config.InstallDir, "config.json")
+	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []ModelInfo{}, nil
@@ -718,8 +631,8 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 		return fmt.Errorf("model name is required")
 	}
 
-	configPath := filepath.Join(a.config.InstallDir, "config.json")
-	data, err := os.ReadFile(configPath)
+	cfgPath := filepath.Join(a.config.InstallDir, "config.json")
+	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return fmt.Errorf("read config.json: %w", err)
 	}
@@ -729,7 +642,6 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 		return fmt.Errorf("parse config.json: %w", err)
 	}
 
-	// Find and remove the model from config
 	var modelPath string
 	newList := make([]struct {
 		Config struct {
@@ -753,7 +665,6 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 		return fmt.Errorf("model %q not found in config.json", modelName)
 	}
 
-	// Delete model directory first (convert Windows path separator if needed)
 	modelPath = filepath.FromSlash(strings.ReplaceAll(modelPath, "\\", "/"))
 	if !filepath.IsAbs(modelPath) {
 		modelPath = filepath.Join(a.config.InstallDir, modelPath)
@@ -762,15 +673,10 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 		return fmt.Errorf("remove model directory: %w", err)
 	}
 
-	// Update config.json after successful deletion
 	ovmsConfig.ModelConfigList = newList
 	updatedData, err := json.MarshalIndent(ovmsConfig, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config.json: %w", err)
 	}
-	if err := os.WriteFile(configPath, updatedData, 0644); err != nil {
-		return fmt.Errorf("write config.json: %w", err)
-	}
-
-	return nil
+	return os.WriteFile(cfgPath, updatedData, 0644)
 }

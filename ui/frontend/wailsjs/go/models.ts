@@ -2,14 +2,14 @@ export namespace main {
 	
 	export class Config {
 	    install_dir: string;
-	    uv_url: string;
 	    ovms_url: string;
+	    export_requirements_url: string;
 	    startup_set: boolean;
 	    search_tags: string[];
 	    pipeline_filters: string[];
 	    search_limit: number;
-	    text_gen_export: Record<string, any>;
-	    embeddings_export: Record<string, any>;
+	    text_gen_target_device: string;
+	    embeddings_target_device: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -18,14 +18,14 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.install_dir = source["install_dir"];
-	        this.uv_url = source["uv_url"];
 	        this.ovms_url = source["ovms_url"];
+	        this.export_requirements_url = source["export_requirements_url"];
 	        this.startup_set = source["startup_set"];
 	        this.search_tags = source["search_tags"];
 	        this.pipeline_filters = source["pipeline_filters"];
 	        this.search_limit = source["search_limit"];
-	        this.text_gen_export = source["text_gen_export"];
-	        this.embeddings_export = source["embeddings_export"];
+	        this.text_gen_target_device = source["text_gen_target_device"];
+	        this.embeddings_target_device = source["embeddings_target_device"];
 	    }
 	}
 	export class HFModel {
@@ -65,7 +65,6 @@ export namespace main {
 	    }
 	}
 	export class StatusResult {
-	    uv_ready: boolean;
 	    deps_ready: boolean;
 	    ovms_ready: boolean;
 	    ovms_version: string;
@@ -76,7 +75,6 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.uv_ready = source["uv_ready"];
 	        this.deps_ready = source["deps_ready"];
 	        this.ovms_ready = source["ovms_ready"];
 	        this.ovms_version = source["ovms_version"];

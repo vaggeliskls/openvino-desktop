@@ -679,7 +679,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  width: 520px;
+  width: 100%;
+  max-width: 100%;
   padding: 32px;
 }
 
@@ -717,7 +718,7 @@ body {
 }
 
 .loading-log {
-  height: 180px;
+  height: 340px;
   margin-top: 4px;
 }
 

@@ -4,11 +4,15 @@ import {main} from '../models';
 
 export function CheckStatus():Promise<main.StatusResult>;
 
-export function ExportModel(arg1:string):Promise<void>;
+export function ExportEmbeddings(arg1:string,arg2:main.EmbeddingsExportConfig):Promise<void>;
+
+export function ExportTextGen(arg1:string,arg2:main.TextGenExportConfig):Promise<void>;
 
 export function GetConfig():Promise<main.Config>;
 
 export function GetStartupEnabled():Promise<boolean>;
+
+export function IsOVMSRunning():Promise<boolean>;
 
 export function PrepareExport():Promise<void>;
 
@@ -25,3 +29,7 @@ export function SaveConfig(arg1:main.Config):Promise<void>;
 export function SearchModels(arg1:string,arg2:Array<string>):Promise<Array<main.HFModel>>;
 
 export function SetStartup(arg1:boolean):Promise<void>;
+
+export function StartOVMS():Promise<void>;
+
+export function StopOVMS():Promise<void>;

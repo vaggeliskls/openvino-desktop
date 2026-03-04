@@ -96,7 +96,12 @@ func extractZip(zipPath, destDir string, log LogFunc) error {
 
 // RunScript runs an arbitrary command in workDir, streaming output via log.
 func RunScript(workDir string, log LogFunc, name string, args ...string) error {
-	return runCmd(workDir, log, name, args...)
+	return runCmd(workDir, nil, log, name, args...)
+}
+
+// RunScriptEnv runs a command with a custom environment, streaming output via log.
+func RunScriptEnv(workDir string, env []string, log LogFunc, name string, args ...string) error {
+	return runCmd(workDir, env, log, name, args...)
 }
 
 func streamLines(r io.Reader, log LogFunc, wg *sync.WaitGroup) {

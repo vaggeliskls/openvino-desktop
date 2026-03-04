@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/vaggeliskls/openvino-desk/ui/internal/setup"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -28,14 +33,35 @@ const (
 var defaultSearchTags = []string{"OpenVINO", "Qwen", "Embedding"}
 var defaultPipelineFilters = []string{"text-generation", "feature-extraction"}
 
+// TextGenExportConfig holds export options for text-generation models.
+type TextGenExportConfig struct {
+	TargetDevice        string `json:"target_device"`
+	Cache               int    `json:"cache"`
+	KvCachePrecision    string `json:"kv_cache_precision"`
+	EnablePrefixCaching bool   `json:"enable_prefix_caching"`
+	ReasoningParser     string `json:"reasoning_parser"`
+	ToolParser          string `json:"tool_parser"`
+	MaxBatchedTokens    int    `json:"max_num_batched_tokens"`
+	MaxNumSeqs          int    `json:"max_num_seqs"`
+}
+
+// EmbeddingsExportConfig holds export options for embedding models.
+type EmbeddingsExportConfig struct {
+	TargetDevice            string `json:"target_device"`
+	WeightFormat            string `json:"weight_format"`
+	ExtraQuantizationParams string `json:"extra_quantization_params"`
+}
+
 type Config struct {
-	InstallDir      string   `json:"install_dir"`
-	UvURL           string   `json:"uv_url"`
-	OvmsURL         string   `json:"ovms_url"`
-	StartupSet      bool     `json:"startup_set"` // true once the startup preference has been written
-	SearchTags      []string `json:"search_tags"`
-	PipelineFilters []string `json:"pipeline_filters"`
-	SearchLimit     int      `json:"search_limit"`
+	InstallDir       string                 `json:"install_dir"`
+	UvURL            string                 `json:"uv_url"`
+	OvmsURL          string                 `json:"ovms_url"`
+	StartupSet       bool                   `json:"startup_set"` // true once the startup preference has been written
+	SearchTags       []string               `json:"search_tags"`
+	PipelineFilters  []string               `json:"pipeline_filters"`
+	SearchLimit      int                    `json:"search_limit"`
+	TextGenExport    TextGenExportConfig    `json:"text_gen_export"`
+	EmbeddingsExport EmbeddingsExportConfig `json:"embeddings_export"`
 }
 
 // StatusResult reports whether each component is ready.
@@ -59,8 +85,10 @@ func ovmsVersionFromURL(ovmsURL string) string {
 
 // App is the Wails application struct.
 type App struct {
-	ctx    context.Context
-	config Config
+	ctx      context.Context
+	config   Config
+	ovmsProc *exec.Cmd
+	ovmsMu   sync.Mutex
 }
 
 func NewApp() *App {
@@ -92,6 +120,19 @@ func defaultConfig() Config {
 		SearchTags:      defaultSearchTags,
 		PipelineFilters: defaultPipelineFilters,
 		SearchLimit:     30,
+		TextGenExport: TextGenExportConfig{
+			TargetDevice:        "GPU",
+			Cache:               2,
+			KvCachePrecision:    "u8",
+			EnablePrefixCaching: true,
+			MaxBatchedTokens:    2048,
+			MaxNumSeqs:          8,
+		},
+		EmbeddingsExport: EmbeddingsExportConfig{
+			TargetDevice:            "CPU",
+			WeightFormat:            "fp16",
+			ExtraQuantizationParams: "--library sentence_transformers",
+		},
 	}
 }
 
@@ -120,6 +161,29 @@ func (a *App) loadConfig() {
 	}
 	if a.config.SearchLimit == 0 {
 		a.config.SearchLimit = 30
+	}
+	tg := &a.config.TextGenExport
+	if tg.TargetDevice == "" {
+		tg.TargetDevice = "GPU"
+	}
+	if tg.Cache == 0 {
+		tg.Cache = 2
+	}
+	if tg.KvCachePrecision == "" {
+		tg.KvCachePrecision = "u8"
+	}
+	if tg.MaxBatchedTokens == 0 {
+		tg.MaxBatchedTokens = 2048
+	}
+	if tg.MaxNumSeqs == 0 {
+		tg.MaxNumSeqs = 8
+	}
+	emb := &a.config.EmbeddingsExport
+	if emb.TargetDevice == "" {
+		emb.TargetDevice = "CPU"
+	}
+	if emb.WeightFormat == "" {
+		emb.WeightFormat = "fp16"
 	}
 }
 
@@ -272,8 +336,24 @@ func (a *App) PullModel(modelID string) error {
 	return setup.RunScript(a.config.InstallDir, a.emit, venvPython, "-c", script)
 }
 
-// ExportModel runs export_model.py with the given Hugging Face model ID.
-func (a *App) ExportModel(modelID string) error {
+// venvEnv returns os.Environ() with the venv Scripts directory prepended to PATH,
+// so that subprocesses spawned by export_model.py (e.g. optimum-cli) can be found.
+func (a *App) venvEnv() []string {
+	scriptsDir := filepath.Join(a.config.InstallDir, "export", "Scripts")
+	base := os.Environ()
+	result := make([]string, 0, len(base))
+	for _, e := range base {
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
+			result = append(result, "PATH="+scriptsDir+";"+e[5:])
+		} else {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+// ExportTextGen exports a text-generation model using export_model.py text_generation.
+func (a *App) ExportTextGen(modelID string, opts TextGenExportConfig) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
@@ -282,7 +362,53 @@ func (a *App) ExportModel(modelID string) error {
 	}
 	venvPython := filepath.Join(a.config.InstallDir, "export", "Scripts", "python.exe")
 	scriptPath := filepath.Join(a.config.InstallDir, "export-model-requirements", "export_model.py")
-	return setup.RunScript(a.config.InstallDir, a.emit, venvPython, scriptPath, "--model_id", modelID)
+	modelsDir := filepath.Join(a.config.InstallDir, "models")
+	args := []string{
+		scriptPath, "text_generation",
+		"--source_model", modelID,
+		"--model_name", modelID,
+		"--model_repository_path", modelsDir,
+		"--target_device", opts.TargetDevice,
+		"--cache", strconv.Itoa(opts.Cache),
+		"--kv_cache_precision", opts.KvCachePrecision,
+		"--max_num_batched_tokens", strconv.Itoa(opts.MaxBatchedTokens),
+		"--max_num_seqs", strconv.Itoa(opts.MaxNumSeqs),
+	}
+	if opts.EnablePrefixCaching {
+		args = append(args, "--enable_prefix_caching")
+	}
+	if opts.ReasoningParser != "" {
+		args = append(args, "--reasoning_parser", opts.ReasoningParser)
+	}
+	if opts.ToolParser != "" {
+		args = append(args, "--tool_parser", opts.ToolParser)
+	}
+	return setup.RunScriptEnv(a.config.InstallDir, a.venvEnv(), a.emit, venvPython, args...)
+}
+
+// ExportEmbeddings exports an embeddings model using export_model.py embeddings_ov.
+func (a *App) ExportEmbeddings(modelID string, opts EmbeddingsExportConfig) error {
+	if a.config.InstallDir == "" {
+		return fmt.Errorf("install directory is not configured")
+	}
+	if modelID == "" {
+		return fmt.Errorf("no model selected")
+	}
+	venvPython := filepath.Join(a.config.InstallDir, "export", "Scripts", "python.exe")
+	scriptPath := filepath.Join(a.config.InstallDir, "export-model-requirements", "export_model.py")
+	modelsDir := filepath.Join(a.config.InstallDir, "models")
+	args := []string{
+		scriptPath, "embeddings_ov",
+		"--source_model", modelID,
+		"--model_name", modelID,
+		"--model_repository_path", modelsDir,
+		"--target_device", opts.TargetDevice,
+		"--weight-format", opts.WeightFormat,
+	}
+	if opts.ExtraQuantizationParams != "" {
+		args = append(args, "--extra_quantization_params", opts.ExtraQuantizationParams)
+	}
+	return setup.RunScriptEnv(a.config.InstallDir, a.venvEnv(), a.emit, venvPython, args...)
 }
 
 // ResetExport removes the uv binary, Python installation and export venv.
@@ -318,4 +444,122 @@ func (a *App) PrepareOVMS() error {
 		return fmt.Errorf("OVMS download URL is not configured")
 	}
 	return setup.PrepareOVMS(a.config.InstallDir, a.config.OvmsURL, a.emit)
+}
+
+// buildOVMSEnv constructs the process environment for running ovms.exe,
+// replicating what setupvars.ps1 does (sets OVMS_DIR, PYTHONHOME, prepends PATH).
+func buildOVMSEnv(ovmsDir string) []string {
+	var prepend []string
+	pythonDir := filepath.Join(ovmsDir, "python")
+	if _, err := os.Stat(pythonDir); err == nil {
+		prepend = []string{ovmsDir, pythonDir, filepath.Join(pythonDir, "Scripts")}
+	} else {
+		prepend = []string{ovmsDir}
+	}
+
+	base := os.Environ()
+	result := make([]string, 0, len(base)+2)
+	for _, e := range base {
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
+			result = append(result, "PATH="+strings.Join(prepend, ";")+";"+e[5:])
+		} else {
+			result = append(result, e)
+		}
+	}
+	result = append(result, "OVMS_DIR="+ovmsDir)
+	if _, err := os.Stat(pythonDir); err == nil {
+		result = append(result, "PYTHONHOME="+pythonDir)
+	}
+	return result
+}
+
+func (a *App) emitServerLog(line string) {
+	runtime.EventsEmit(a.ctx, "server-log", line)
+}
+
+func (a *App) streamReader(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			a.emitServerLog(line)
+		}
+	}
+}
+
+// StartOVMS sources setupvars.ps1 env and starts the OVMS server process,
+// streaming its output via "server-log" events.
+func (a *App) StartOVMS() error {
+	a.ovmsMu.Lock()
+	defer a.ovmsMu.Unlock()
+
+	if a.ovmsProc != nil {
+		return fmt.Errorf("OVMS server is already running")
+	}
+
+	ovmsDir := filepath.Join(a.config.InstallDir, "ovms")
+	ovmsExe := filepath.Join(ovmsDir, "ovms.exe")
+	ovmsConfig := filepath.Join(a.config.InstallDir, "config.json")
+	if _, err := os.Stat(ovmsExe); err != nil {
+		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
+	}
+
+	modelsDir := filepath.Join(a.config.InstallDir, "models")
+	os.MkdirAll(modelsDir, 0755) //nolint: errcheck
+
+	cmd := exec.Command(ovmsExe, "--port", "9000", "--rest_port", "8080", "--config_path", ovmsConfig)
+	cmd.Dir = ovmsDir
+	cmd.Env = buildOVMSEnv(ovmsDir)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start ovms: %w", err)
+	}
+
+	a.ovmsProc = cmd
+	runtime.EventsEmit(a.ctx, "server-status", true)
+
+	go func() {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); a.streamReader(stdout) }()
+		go func() { defer wg.Done(); a.streamReader(stderr) }()
+		wg.Wait()
+		cmd.Wait() //nolint: errcheck
+
+		a.ovmsMu.Lock()
+		a.ovmsProc = nil
+		a.ovmsMu.Unlock()
+		runtime.EventsEmit(a.ctx, "server-status", false)
+	}()
+
+	return nil
+}
+
+// StopOVMS kills the running OVMS server process.
+func (a *App) StopOVMS() error {
+	a.ovmsMu.Lock()
+	defer a.ovmsMu.Unlock()
+
+	if a.ovmsProc == nil {
+		return nil
+	}
+	if err := a.ovmsProc.Process.Kill(); err != nil {
+		return fmt.Errorf("kill ovms: %w", err)
+	}
+	return nil
+}
+
+// IsOVMSRunning reports whether the OVMS server process is active.
+func (a *App) IsOVMSRunning() bool {
+	a.ovmsMu.Lock()
+	defer a.ovmsMu.Unlock()
+	return a.ovmsProc != nil
 }

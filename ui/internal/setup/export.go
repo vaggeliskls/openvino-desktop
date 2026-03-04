@@ -43,7 +43,7 @@ func PrepareExport(installDir, uvURL string, log LogFunc) error {
 	if _, err := os.Stat(pythonExe); os.IsNotExist(err) {
 		log("Installing Python " + pythonVer + "...")
 		pythonInstallDir := filepath.Join(installDir, "python")
-		if err := runCmd(installDir, log, uvBin, "python", "install", pythonVer, "--install-dir", pythonInstallDir); err != nil {
+		if err := runCmd(installDir, nil, log, uvBin, "python", "install", pythonVer, "--install-dir", pythonInstallDir); err != nil {
 			return fmt.Errorf("install python: %w", err)
 		}
 	} else {
@@ -55,7 +55,7 @@ func PrepareExport(installDir, uvURL string, log LogFunc) error {
 	venvPython := filepath.Join(venvDir, "Scripts", "python.exe")
 	if _, err := os.Stat(venvPython); os.IsNotExist(err) {
 		log("Creating virtual environment...")
-		if err := runCmd(installDir, log, uvBin, "venv", venvDir, "--python", pythonExe, "--relocatable"); err != nil {
+		if err := runCmd(installDir, nil, log, uvBin, "venv", venvDir, "--python", pythonExe, "--relocatable"); err != nil {
 			return fmt.Errorf("create venv: %w", err)
 		}
 	} else {
@@ -64,7 +64,7 @@ func PrepareExport(installDir, uvURL string, log LogFunc) error {
 
 	// Step 3: Install requirements
 	log("Installing requirements...")
-	if err := runCmd(installDir, log, uvBin, "pip", "install", "--python", venvPython, "-r", requirementsFile); err != nil {
+	if err := runCmd(installDir, nil, log, uvBin, "pip", "install", "--python", venvPython, "-r", requirementsFile); err != nil {
 		return fmt.Errorf("install requirements: %w", err)
 	}
 
@@ -72,9 +72,12 @@ func PrepareExport(installDir, uvURL string, log LogFunc) error {
 	return nil
 }
 
-func runCmd(workDir string, log LogFunc, name string, args ...string) error {
+func runCmd(workDir string, env []string, log LogFunc, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = workDir
+	if env != nil {
+		cmd.Env = env
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

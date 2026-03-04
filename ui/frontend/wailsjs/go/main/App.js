@@ -6,8 +6,12 @@ export function CheckStatus() {
   return window['go']['main']['App']['CheckStatus']();
 }
 
-export function ExportModel(arg1) {
-  return window['go']['main']['App']['ExportModel'](arg1);
+export function ExportEmbeddings(arg1, arg2) {
+  return window['go']['main']['App']['ExportEmbeddings'](arg1, arg2);
+}
+
+export function ExportTextGen(arg1, arg2) {
+  return window['go']['main']['App']['ExportTextGen'](arg1, arg2);
 }
 
 export function GetConfig() {
@@ -16,6 +20,10 @@ export function GetConfig() {
 
 export function GetStartupEnabled() {
   return window['go']['main']['App']['GetStartupEnabled']();
+}
+
+export function IsOVMSRunning() {
+  return window['go']['main']['App']['IsOVMSRunning']();
 }
 
 export function PrepareExport() {
@@ -48,4 +56,12 @@ export function SearchModels(arg1, arg2) {
 
 export function SetStartup(arg1) {
   return window['go']['main']['App']['SetStartup'](arg1);
+}
+
+export function StartOVMS() {
+  return window['go']['main']['App']['StartOVMS']();
+}
+
+export function StopOVMS() {
+  return window['go']['main']['App']['StopOVMS']();
 }

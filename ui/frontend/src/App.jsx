@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { GetConfig, SaveConfig, PrepareExport, PrepareOVMS, ResetExport, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportModel, PullModel } from '../wailsjs/go/main/App'
+import { GetConfig, SaveConfig, PrepareExport, PrepareOVMS, ResetExport, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
 function StatusBadge({ ready, label }) {
@@ -36,6 +36,11 @@ export default function App() {
   const [initStep, setInitStep] = useState('Checking setup…')
   const [initError, setInitError] = useState(null)
 
+  const [serverRunning, setServerRunning] = useState(false)
+  const [serverLogs, setServerLogs] = useState([])
+
+  const [exportOpts, setExportOpts] = useState(null)
+
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
@@ -44,6 +49,7 @@ export default function App() {
 
   const logsEndRef = useRef(null)
   const initLogsEndRef = useRef(null)
+  const serverLogsEndRef = useRef(null)
   const startupRan = useRef(false)
 
   useEffect(() => {
@@ -51,6 +57,20 @@ export default function App() {
       setLogs(prev => [...prev, line])
     })
     return () => { if (offLog) offLog() }
+  }, [])
+
+  useEffect(() => {
+    const offServerLog = EventsOn('server-log', line => {
+      setServerLogs(prev => [...prev, line])
+    })
+    const offServerStatus = EventsOn('server-status', running => {
+      setServerRunning(running)
+    })
+    IsOVMSRunning().then(setServerRunning)
+    return () => {
+      if (offServerLog) offServerLog()
+      if (offServerStatus) offServerStatus()
+    }
   }, [])
 
   useEffect(() => {
@@ -100,9 +120,22 @@ export default function App() {
   }, [status])
 
   useEffect(() => {
+    if (!selectedModel) { setExportOpts(null); return }
+    const info = searchResults.find(m => m.id === selectedModel)
+    const tag = info?.pipeline_tag
+    if (tag === 'text-generation') setExportOpts({ ...(config.text_gen_export || {}) })
+    else if (tag === 'feature-extraction') setExportOpts({ ...(config.embeddings_export || {}) })
+    else setExportOpts(null)
+  }, [selectedModel, searchResults])
+
+  useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     initLogsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
+
+  useEffect(() => {
+    serverLogsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [serverLogs])
 
   const handleSave = async () => {
     await SaveConfig(config)
@@ -241,7 +274,44 @@ export default function App() {
           <div className="panel">
             {!allReady
               ? <NotReady onGo={() => setTab('dependencies')} />
-              : <p className="empty-state">No models configured yet.</p>
+              : (
+                <>
+                  <div className="action-card">
+                    <div className="action-card-body">
+                      <h3>OVMS Server</h3>
+                      <p>Start the OpenVINO Model Server on port 9000 (REST 8080).</p>
+                    </div>
+                    <div className="server-controls">
+                      {!serverRunning
+                        ? (
+                          <button className="btn-primary" onClick={() => {
+                            setServerLogs([])
+                            StartOVMS().catch(err => setServerLogs(prev => [...prev, '--- Error: ' + String(err) + ' ---']))
+                          }}>
+                            Start Server
+                          </button>
+                        )
+                        : (
+                          <button className="btn-reset" onClick={() => StopOVMS().catch(() => {})}>
+                            Stop Server
+                          </button>
+                        )
+                      }
+                    </div>
+                  </div>
+
+                  {serverLogs.length > 0 && (
+                    <div className="log-section">
+                      <div className="log-box">
+                        {serverLogs.map((line, i) => (
+                          <div key={i} className={line.startsWith('---') ? 'log-done' : 'log-line'}>{line}</div>
+                        ))}
+                        <div ref={serverLogsEndRef} />
+                      </div>
+                    </div>
+                  )}
+                </>
+              )
             }
           </div>
         )}
@@ -301,13 +371,76 @@ export default function App() {
                             </option>
                           ))}
                         </select>
+
+                        {selectedModel && !isSelectedOV && exportOpts && (
+                          <div className="export-opts">
+                            {selectedModelInfo?.pipeline_tag === 'text-generation' && (
+                              <>
+                                <div className="opts-grid">
+                                  <label>Target Device
+                                    <select value={exportOpts.target_device || 'GPU'} onChange={e => setExportOpts(p => ({ ...p, target_device: e.target.value }))}>
+                                      <option>GPU</option><option>CPU</option><option>NPU</option>
+                                    </select>
+                                  </label>
+                                  <label>Cache (GB)
+                                    <input type="number" min="1" max="32" value={exportOpts.cache || 2} onChange={e => setExportOpts(p => ({ ...p, cache: parseInt(e.target.value) || 2 }))} />
+                                  </label>
+                                  <label>KV Precision
+                                    <select value={exportOpts.kv_cache_precision || 'u8'} onChange={e => setExportOpts(p => ({ ...p, kv_cache_precision: e.target.value }))}>
+                                      <option value="u8">u8</option><option value="fp16">fp16</option>
+                                    </select>
+                                  </label>
+                                  <label>Max Batched Tokens
+                                    <input type="number" min="256" value={exportOpts.max_num_batched_tokens || 2048} onChange={e => setExportOpts(p => ({ ...p, max_num_batched_tokens: parseInt(e.target.value) || 2048 }))} />
+                                  </label>
+                                  <label>Max Seqs
+                                    <input type="number" min="1" value={exportOpts.max_num_seqs || 8} onChange={e => setExportOpts(p => ({ ...p, max_num_seqs: parseInt(e.target.value) || 8 }))} />
+                                  </label>
+                                  <label>Reasoning Parser
+                                    <input value={exportOpts.reasoning_parser || ''} placeholder="e.g. qwen3" onChange={e => setExportOpts(p => ({ ...p, reasoning_parser: e.target.value }))} />
+                                  </label>
+                                  <label>Tool Parser
+                                    <input value={exportOpts.tool_parser || ''} placeholder="e.g. hermes3" onChange={e => setExportOpts(p => ({ ...p, tool_parser: e.target.value }))} />
+                                  </label>
+                                  <label className="opts-checkbox">
+                                    <input type="checkbox" checked={!!exportOpts.enable_prefix_caching} onChange={e => setExportOpts(p => ({ ...p, enable_prefix_caching: e.target.checked }))} />
+                                    Prefix Caching
+                                  </label>
+                                </div>
+                              </>
+                            )}
+                            {selectedModelInfo?.pipeline_tag === 'feature-extraction' && (
+                              <div className="opts-grid">
+                                <label>Target Device
+                                  <select value={exportOpts.target_device || 'CPU'} onChange={e => setExportOpts(p => ({ ...p, target_device: e.target.value }))}>
+                                    <option>CPU</option><option>GPU</option>
+                                  </select>
+                                </label>
+                                <label>Weight Format
+                                  <select value={exportOpts.weight_format || 'fp16'} onChange={e => setExportOpts(p => ({ ...p, weight_format: e.target.value }))}>
+                                    <option value="fp16">fp16</option><option value="int8">int8</option><option value="fp32">fp32</option>
+                                  </select>
+                                </label>
+                                <label className="opts-wide">Extra Quant Params
+                                  <input value={exportOpts.extra_quantization_params || ''} placeholder="e.g. --library sentence_transformers" onChange={e => setExportOpts(p => ({ ...p, extra_quantization_params: e.target.value }))} />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="search-actions">
                           <button
                             className="btn-primary"
                             disabled={running || !selectedModel}
-                            onClick={() => run(() => isSelectedOV ? PullModel(selectedModel) : ExportModel(selectedModel))}
+                            onClick={() => {
+                              if (isSelectedOV) return run(() => PullModel(selectedModel))
+                              const tag = selectedModelInfo?.pipeline_tag
+                              if (tag === 'text-generation') return run(() => ExportTextGen(selectedModel, exportOpts))
+                              if (tag === 'feature-extraction') return run(() => ExportEmbeddings(selectedModel, exportOpts))
+                            }}
                           >
-                            {running ? 'Running…' : isSelectedOV ? `Pull ${selectedModel || '…'}` : `Export ${selectedModel || '…'}`}
+                            {running ? 'Running…' : isSelectedOV ? `Pull` : `Export`}
                           </button>
                           {selectedModel && (
                             <button
@@ -322,17 +455,18 @@ export default function App() {
                     )}
                   </div>
 
-                  {(logs.length > 0 || error) && (
-                    <div className="log-section">
-                      {error && <div className="error">{error}</div>}
-                      <div className="log-box">
-                        {logs.map((line, i) => (
+                  <div className="log-section">
+                    {error && <div className="error">{error}</div>}
+                    <div className="log-box">
+                      {logs.length === 0 && !error
+                        ? <div className="log-line log-empty">Export output will appear here…</div>
+                        : logs.map((line, i) => (
                           <div key={i} className={line.startsWith('---') ? 'log-done' : 'log-line'}>{line}</div>
-                        ))}
-                        <div ref={logsEndRef} />
-                      </div>
+                        ))
+                      }
+                      <div ref={logsEndRef} />
                     </div>
-                  )}
+                  </div>
                 </>
               )
             }

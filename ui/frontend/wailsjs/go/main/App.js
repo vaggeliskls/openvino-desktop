@@ -10,12 +10,12 @@ export function DeleteInstalledModel(arg1) {
   return window['go']['main']['App']['DeleteInstalledModel'](arg1);
 }
 
-export function ExportEmbeddings(arg1, arg2) {
-  return window['go']['main']['App']['ExportEmbeddings'](arg1, arg2);
+export function ExportEmbeddings(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExportEmbeddings'](arg1, arg2, arg3);
 }
 
-export function ExportTextGen(arg1, arg2) {
-  return window['go']['main']['App']['ExportTextGen'](arg1, arg2);
+export function ExportTextGen(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExportTextGen'](arg1, arg2, arg3);
 }
 
 export function GetConfig() {
@@ -34,20 +34,13 @@ export function IsOVMSRunning() {
   return window['go']['main']['App']['IsOVMSRunning']();
 }
 
-export function PrepareExport() {
-  return window['go']['main']['App']['PrepareExport']();
-}
-
 export function PrepareOVMS() {
   return window['go']['main']['App']['PrepareOVMS']();
 }
 
-export function PullModel(arg1) {
-  return window['go']['main']['App']['PullModel'](arg1);
-}
-
-export function ResetExport() {
-  return window['go']['main']['App']['ResetExport']();
+/** @param {string} arg1 @param {string} arg2 @param {string} arg3 */
+export function PullModel(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PullModel'](arg1, arg2, arg3);
 }
 
 export function ResetOVMS() {

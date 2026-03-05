@@ -20,9 +20,7 @@ else
     PATHSEP   = /
 endif
 
-.PHONY: help install export run clean get-remote-export openvino build-cli ui-assets ui-dev ui-build
-
-UV_VERSION = 0.10.7
+.PHONY: help install export run clean get-remote-export openvino build-cli ui-dev ui-build
 
 help:
 	@echo Available commands:
@@ -33,20 +31,16 @@ help:
 	@echo   make get-remote-export  - Download and extract latest export release
 	@echo   make openvino           - Download and extract OVMS server
 	@echo   make build-cli          - Build the Go CLI binary
-	@echo   make ui-assets          - Copy export scripts into ui/assets (run once before build)
 	@echo   make ui-dev             - Run Wails UI in development mode
 	@echo   make ui-build           - Build Wails UI as a Windows executable
 
 install:
-	curl -L https://github.com/astral-sh/uv/releases/download/$(UV_VERSION)/$(UV_ZIP) -o uv-tmp.zip
-	tar -xf uv-tmp.zip $(UV_BIN)
-	$(RM) uv-tmp.zip
 	./$(UV_BIN) python install 3.12.12 --install-dir ./python
 	./$(UV_BIN) venv export --python ./python/cpython-3.12.12-windows-x86_64-none/python.exe --relocatable
-	./$(UV_BIN) pip install --python $(PYTHON) -r export-model-requirements/requirements.txt
+	./$(UV_BIN) pip install --python $(PYTHON) -r ui/assets/export-model-requirements/requirements.txt
 
 export:
-	$(PYTHON) export-model-requirements/export_model.py $(ARGS)
+	$(PYTHON) ui/assets/export-model-requirements/export_model.py $(ARGS)
 
 run:
 	ovms/setupvars.ps1 && ovms/ovms.exe --rest_port 8000 --config_path config.json
@@ -60,20 +54,14 @@ openvino:
 build-cli:
 	cd cli && go build -o ../openvino-cli.exe .
 
-# Populate ui/assets/ with export scripts (required before ui-dev or ui-build)
-ui-assets:
-	-$(MKDIR_P) ui$(PATHSEP)assets$(PATHSEP)export-model-requirements
-	$(CP) export-model-requirements$(PATHSEP)requirements.txt ui$(PATHSEP)assets$(PATHSEP)export-model-requirements$(PATHSEP)requirements.txt
-	$(CP) export-model-requirements$(PATHSEP)export_model.py ui$(PATHSEP)assets$(PATHSEP)export-model-requirements$(PATHSEP)export_model.py
-
 appicon:
 	$(CP) ui$(PATHSEP)appicon.png ui$(PATHSEP)build$(PATHSEP)appicon.png
 	$(CP) ui$(PATHSEP)logo.ico ui$(PATHSEP)build$(PATHSEP)windows$(PATHSEP)icon.ico
 
-ui-dev: ui-assets appicon
+ui-dev: appicon
 	cd ui && wails dev
 
-ui-build: ui-assets appicon
+ui-build: appicon
 	cd ui && wails build
 
 get-remote-export:
@@ -82,7 +70,3 @@ get-remote-export:
 	tar -xf export-windows.zip
 	$(RM) export-windows.zip
 
-clean:
-	-$(RM_RF) export
-	-$(RM_RF) python
-	-$(RM) $(UV_BIN)

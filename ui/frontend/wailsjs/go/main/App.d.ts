@@ -6,9 +6,9 @@ export function CheckStatus():Promise<main.StatusResult>;
 
 export function DeleteInstalledModel(arg1:string):Promise<void>;
 
-export function ExportEmbeddings(arg1:string,arg2:Record<string, any>):Promise<void>;
+export function ExportEmbeddings(arg1:string,arg2:string,arg3:Record<string, any>):Promise<void>;
 
-export function ExportTextGen(arg1:string,arg2:Record<string, any>):Promise<void>;
+export function ExportTextGen(arg1:string,arg2:string,arg3:Record<string, any>):Promise<void>;
 
 export function GetConfig():Promise<main.Config>;
 
@@ -18,13 +18,9 @@ export function GetStartupEnabled():Promise<boolean>;
 
 export function IsOVMSRunning():Promise<boolean>;
 
-export function PrepareExport():Promise<void>;
-
 export function PrepareOVMS():Promise<void>;
 
-export function PullModel(arg1:string):Promise<void>;
-
-export function ResetExport():Promise<void>;
+export function PullModel(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ResetOVMS():Promise<void>;
 

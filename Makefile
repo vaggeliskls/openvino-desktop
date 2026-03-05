@@ -70,10 +70,10 @@ appicon:
 	$(CP) ui$(PATHSEP)appicon.png ui$(PATHSEP)build$(PATHSEP)appicon.png
 	$(CP) ui$(PATHSEP)logo.ico ui$(PATHSEP)build$(PATHSEP)windows$(PATHSEP)icon.ico
 
-ui-dev: ui-assets appicon
+ui-dev: appicon
 	cd ui && wails dev
 
-ui-build: ui-assets appicon
+ui-build: appicon
 	cd ui && wails build
 
 get-remote-export:

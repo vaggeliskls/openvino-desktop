@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	defaultOvmsURL               = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.0/ovms_windows_python_on.zip"
-	defaultExportRequirementsURL = "https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models/requirements.txt"
+	defaultOvmsURL = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.0/ovms_windows_python_on.zip"
 )
 
 // Config holds user-configurable settings.
@@ -31,7 +30,6 @@ var defaultPipelineFilters = []string{"text-generation", "feature-extraction"}
 type Config struct {
 	InstallDir             string   `json:"install_dir"`
 	OvmsURL                string   `json:"ovms_url"`
-	ExportRequirementsURL  string   `json:"export_requirements_url"`
 	StartupSet             bool     `json:"startup_set"`
 	SearchTags             []string `json:"search_tags"`
 	PipelineFilters        []string `json:"pipeline_filters"`
@@ -91,7 +89,6 @@ func defaultConfig() Config {
 	return Config{
 		InstallDir:             filepath.Join(home, "openvino-desk"),
 		OvmsURL:                defaultOvmsURL,
-		ExportRequirementsURL:  defaultExportRequirementsURL,
 		SearchTags:             defaultSearchTags,
 		PipelineFilters:        defaultPipelineFilters,
 		SearchLimit:            30,
@@ -112,9 +109,6 @@ func (a *App) loadConfig() {
 	}
 	if a.config.OvmsURL == "" {
 		a.config.OvmsURL = defaultOvmsURL
-	}
-	if a.config.ExportRequirementsURL == "" {
-		a.config.ExportRequirementsURL = defaultExportRequirementsURL
 	}
 	if len(a.config.SearchTags) == 0 {
 		a.config.SearchTags = defaultSearchTags
@@ -171,21 +165,6 @@ func (a *App) emit(line string) {
 	runtime.EventsEmit(a.ctx, "log", line)
 }
 
-// PrepareExport installs ML requirements using the OVMS bundled Python.
-// OVMS must be ready before calling this.
-func (a *App) PrepareExport() error {
-	if a.config.InstallDir == "" {
-		return fmt.Errorf("install directory is not configured")
-	}
-	if a.config.ExportRequirementsURL == "" {
-		return fmt.Errorf("export requirements URL is not configured")
-	}
-	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	if _, err := os.Stat(ovmsDirPath); err != nil {
-		return fmt.Errorf("OVMS is not installed — prepare OVMS first")
-	}
-	return setup.PrepareExport(a.config.InstallDir, a.config.ExportRequirementsURL, a.emit)
-}
 
 // HFModel is a minimal representation of a Hugging Face model search result.
 type HFModel struct {
@@ -274,17 +253,17 @@ func (a *App) PullModel(modelID, targetDevice string) error {
 	return a.ovmsAddToConfig(ovmsExe, ovmsDirPath, modelID, modelsDir, targetDevice)
 }
 
-// ExportTextGen exports a text-generation model using ovms --pull --task text_generation.
+// ExportTextGen exports a text-generation model using export_model.py.
 func (a *App) ExportTextGen(modelID, targetDevice string, extraOpts map[string]interface{}) error {
-	return a.ovmsPullTask(modelID, "text_generation", targetDevice, extraOpts)
+	return a.exportWithScript(modelID, "text_generation", targetDevice, extraOpts)
 }
 
-// ExportEmbeddings exports an embeddings model using ovms --pull --task embeddings.
+// ExportEmbeddings exports an embeddings model using export_model.py.
 func (a *App) ExportEmbeddings(modelID, targetDevice string, extraOpts map[string]interface{}) error {
-	return a.ovmsPullTask(modelID, "embeddings", targetDevice, extraOpts)
+	return a.exportWithScript(modelID, "embeddings_ov", targetDevice, extraOpts)
 }
 
-func (a *App) ovmsPullTask(modelID, task, targetDevice string, extraOpts map[string]interface{}) error {
+func (a *App) exportWithScript(modelID, task, targetDevice string, extraOpts map[string]interface{}) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
@@ -293,17 +272,22 @@ func (a *App) ovmsPullTask(modelID, task, targetDevice string, extraOpts map[str
 	}
 
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
-	if _, err := os.Stat(ovmsExe); err != nil {
-		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
+	pythonExe := filepath.Join(ovmsDirPath, "python", "python.exe")
+	scriptPath := filepath.Join(ovmsDirPath, "python", "Lib", "export_model.py")
+
+	if _, err := os.Stat(pythonExe); err != nil {
+		return fmt.Errorf("python not found at %s", pythonExe)
+	}
+	if _, err := os.Stat(scriptPath); err != nil {
+		return fmt.Errorf("export_model.py not found at %s", scriptPath)
 	}
 
 	modelsDir := filepath.Join(a.config.InstallDir, "models")
 	os.MkdirAll(modelsDir, 0755) //nolint: errcheck
 
 	args := []string{
-		"--pull",
-		"--task", task,
+		scriptPath,
+		task,
 		"--source_model", modelID,
 		"--model_repository_path", modelsDir,
 		"--model_name", modelID,
@@ -323,15 +307,17 @@ func (a *App) ovmsPullTask(modelID, task, targetDevice string, extraOpts map[str
 		}
 	}
 
-	a.emit("$ " + ovmsExe + " " + strings.Join(args, " "))
+	a.emit("$ " + pythonExe + " " + strings.Join(args, " "))
 
-	cmd := exec.Command(ovmsExe, args...)
+	cmd := exec.Command(pythonExe, args...)
 	cmd.Dir = ovmsDirPath
 	cmd.Env = buildOVMSEnv(ovmsDirPath)
 
 	if err := a.streamCmd(cmd); err != nil {
 		return err
 	}
+
+	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
 	return a.ovmsAddToConfig(ovmsExe, ovmsDirPath, modelID, modelsDir, targetDevice)
 }
 
@@ -453,11 +439,18 @@ func (a *App) ResetExport() error {
 	return nil
 }
 
-// ResetOVMS removes the OVMS server directory.
+// ResetOVMS removes the OVMS server directory and the deps-ready marker.
+// Uses rd /s /q for fast native Windows deletion.
 func (a *App) ResetOVMS() error {
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	if err := os.RemoveAll(ovmsDirPath); err != nil {
-		return fmt.Errorf("remove ovms: %w", err)
+	if _, err := os.Stat(ovmsDirPath); err == nil {
+		if err := exec.Command("cmd", "/c", "rd", "/s", "/q", ovmsDirPath).Run(); err != nil {
+			return fmt.Errorf("remove ovms: %w", err)
+		}
+	}
+	marker := filepath.Join(a.config.InstallDir, ".deps-ready")
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove marker: %w", err)
 	}
 	return nil
 }
@@ -484,17 +477,22 @@ func buildOVMSEnv(ovmsDir string) []string {
 	}
 
 	base := os.Environ()
-	result := make([]string, 0, len(base)+2)
+	result := make([]string, 0, len(base)+4)
 	for _, e := range base {
-		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
+		upper := strings.ToUpper(e)
+		if strings.HasPrefix(upper, "PATH=") {
 			result = append(result, "PATH="+strings.Join(prepend, ";")+";"+e[5:])
+		} else if strings.HasPrefix(upper, "PYTHONPATH=") || strings.HasPrefix(upper, "PYTHONHOME=") {
+			// strip system python env — we set our own below
 		} else {
 			result = append(result, e)
 		}
 	}
 	result = append(result, "OVMS_DIR="+ovmsDir)
 	if _, err := os.Stat(pythonDir); err == nil {
+		sitePackages := filepath.Join(pythonDir, "Lib", "site-packages")
 		result = append(result, "PYTHONHOME="+pythonDir)
+		result = append(result, "PYTHONPATH="+sitePackages)
 	}
 	return result
 }
@@ -677,7 +675,7 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 	if !filepath.IsAbs(modelPath) {
 		modelPath = filepath.Join(a.config.InstallDir, modelPath)
 	}
-	if err := os.RemoveAll(modelPath); err != nil {
+	if err := exec.Command("cmd", "/c", "rd", "/s", "/q", modelPath).Run(); err != nil {
 		return fmt.Errorf("remove model directory: %w", err)
 	}
 

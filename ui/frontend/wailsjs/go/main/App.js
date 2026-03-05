@@ -34,10 +34,6 @@ export function IsOVMSRunning() {
   return window['go']['main']['App']['IsOVMSRunning']();
 }
 
-export function PrepareExport() {
-  return window['go']['main']['App']['PrepareExport']();
-}
-
 export function PrepareOVMS() {
   return window['go']['main']['App']['PrepareOVMS']();
 }

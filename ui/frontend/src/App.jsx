@@ -1,6 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
-import { GetConfig, SaveConfig, PrepareExport, PrepareOVMS, ResetExport, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel } from '../wailsjs/go/main/App'
+import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
+
+const PROGRESS_MAP = {
+  'Downloading OVMS': 15,
+  'Extracting OVMS': 25,
+  'OVMS ready': 30,
+  'Downloading export bundle': 60,
+  'Installing export bundle': 85,
+  'Setup complete': 100,
+}
 
 function StatusBadge({ ready, label }) {
   return (
@@ -11,21 +20,11 @@ function StatusBadge({ ready, label }) {
   )
 }
 
-function NotReady({ onGo }) {
-  return (
-    <div className="not-ready">
-      <span>Dependencies are not ready.</span>
-      <button className="btn-ghost" onClick={onGo}>Go to Dependencies →</button>
-    </div>
-  )
-}
-
 export default function App() {
-  const [tab, setTab] = useState('dependencies')
+  const [tab, setTab] = useState('server')
   const [config, setConfig] = useState({
     install_dir: '',
     ovms_url: '',
-    export_requirements_url: '',
     search_tags: [],
     pipeline_filters: [],
     search_limit: 30,
@@ -36,14 +35,14 @@ export default function App() {
   const [newFilter, setNewFilter] = useState('')
   const [saved, setSaved] = useState(false)
   const [startup, setStartup] = useState(false)
-  const [status, setStatus] = useState({ deps_ready: false, ovms_ready: false })
+  const [status, setStatus] = useState(null)
   const [logs, setLogs] = useState([])
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
 
-  const [initializing, setInitializing] = useState(true)
   const [initStep, setInitStep] = useState('Checking setup…')
   const [initError, setInitError] = useState(null)
+  const [progress, setProgress] = useState(0)
 
   const [serverRunning, setServerRunning] = useState(false)
   const [serverLogs, setServerLogs] = useState([])
@@ -68,6 +67,9 @@ export default function App() {
   useEffect(() => {
     const offLog = EventsOn('log', line => {
       setLogs(prev => [...prev, line])
+      setInitStep(line)
+      const match = Object.entries(PROGRESS_MAP).find(([k]) => line.startsWith(k))
+      if (match) setProgress(match[1])
     })
     return () => { if (offLog) offLog() }
   }, [])
@@ -96,44 +98,37 @@ export default function App() {
       setStartup(su)
     })
 
+    const autoStart = async () => {
+      for (let i = 0; i < 3; i++) {
+        try { await StartOVMS(); return } catch {}
+        await new Promise(r => setTimeout(r, 1000))
+      }
+    }
+
     CheckStatus().then(async s => {
       setStatus(s)
       if (s.deps_ready && s.ovms_ready) {
-        setInitializing(false)
+        autoStart()
         return
       }
       setRunning(true)
       try {
-        if (!s.ovms_ready) {
-          setInitStep('Setting up OVMS server…')
-          await PrepareOVMS()
-          const s2 = await CheckStatus()
-          setStatus(s2)
-        }
-        const s3 = await CheckStatus()
-        if (!s3.deps_ready && s3.ovms_ready) {
-          setInitStep('Installing export requirements…')
-          await PrepareExport()
-          const s4 = await CheckStatus()
-          setStatus(s4)
-        }
+        setInitStep('Setting up OVMS…')
+        await PrepareOVMS()
+        const s2 = await CheckStatus()
+        setStatus(s2)
+        setLogs([])
+        autoStart()
       } catch (err) {
         setInitError(String(err))
       } finally {
         setRunning(false)
       }
-      setInitializing(false)
     })
   }, [])
 
   useEffect(() => {
-    if (status.deps_ready && status.ovms_ready && tab === 'dependencies') {
-      setTab('models')
-    }
-  }, [status])
-
-  useEffect(() => {
-    if (tab === 'models' && status.deps_ready && status.ovms_ready) {
+    if (tab === 'models' && status?.deps_ready && status?.ovms_ready) {
       loadInstalledModels()
     }
   }, [tab, status])
@@ -167,6 +162,7 @@ export default function App() {
   const run = (action) => {
     setLogs([])
     setError(null)
+    setProgress(0)
     setRunning(true)
     action()
       .then(() => {
@@ -176,6 +172,36 @@ export default function App() {
       })
       .catch(err => setError(String(err)))
       .finally(() => setRunning(false))
+  }
+
+  const runSetup = async () => {
+    setInitError(null)
+    setProgress(0)
+    setInitStep('Setting up OVMS…')
+    setRunning(true)
+    try {
+      await PrepareOVMS()
+      const s2 = await CheckStatus()
+      setStatus(s2)
+      setLogs([])
+    } catch (err) {
+      setInitError(String(err))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const handleReset = async () => {
+    setStatus(null)
+    setRunning(true)
+    try {
+      await ResetOVMS()
+    } catch (err) {
+      setInitError(String(err))
+      setRunning(false)
+      return
+    }
+    await runSetup()
   }
 
   const loadInstalledModels = () => {
@@ -226,26 +252,26 @@ export default function App() {
   const isSelectedOV = selectedModelInfo?.library_name === 'openvino' ||
     selectedModel.toLowerCase().startsWith('openvino/')
 
-  const allReady = status.deps_ready && status.ovms_ready
+  const allReady = status?.deps_ready && status?.ovms_ready
 
-  if (initializing) {
+  if (!status || !allReady) {
     return (
       <div className="loading-screen">
         <div className="loading-content">
           <div className="loading-title">OpenVINO Desktop</div>
           <div className="loading-step">{initStep}</div>
           <div className="progress-bar">
-            <div className="progress-fill" />
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
           </div>
-          {logs.length > 0 && (
-            <div className="log-box loading-log">
-              {logs.map((line, i) => (
-                <div key={i} className={line.startsWith('---') ? 'log-done' : 'log-line'}>{line}</div>
-              ))}
-              <div ref={initLogsEndRef} />
-            </div>
+          <div className="progress-label">{progress > 0 ? `${progress}%` : ''}</div>
+          {initError && (
+            <>
+              <div className="error">{initError}</div>
+              <button className="btn-primary" style={{ marginTop: 16 }} onClick={runSetup}>
+                Retry
+              </button>
+            </>
           )}
-          {initError && <div className="error">{initError}</div>}
         </div>
       </div>
     )
@@ -256,78 +282,28 @@ export default function App() {
       <header className="app-header">
         <span className="app-title">OpenVINO Desktop</span>
         <nav className="tabs">
-          {['dependencies', 'server', 'models', 'settings'].map(t => {
-            if (t === 'dependencies' && allReady) return null
-            const locked = !allReady && (t === 'server' || t === 'models')
+          {['server', 'models', 'settings'].map(t => {
             const label = t === 'server' ? 'Models Server' : t.charAt(0).toUpperCase() + t.slice(1)
             return (
               <button
                 key={t}
-                className={`tab ${tab === t ? 'active' : ''} ${locked ? 'tab-locked' : ''}`}
+                className={`tab ${tab === t ? 'active' : ''}`}
                 onClick={() => setTab(t)}
               >
                 {label}
-                {locked && <span className="tab-lock-icon">🔒</span>}
               </button>
             )
           })}
         </nav>
         <div className="status-row header-status">
-          <StatusBadge ready={status.deps_ready} label="Export" />
-          <StatusBadge ready={status.ovms_ready} label={status.ovms_version ? `OVMS ${status.ovms_version}` : 'OVMS'} />
+          <StatusBadge ready={status.ovms_ready && status.deps_ready} label={status.ovms_version ? `OVMS ${status.ovms_version}` : 'OVMS'} />
         </div>
       </header>
 
       <main className="tab-content">
-        {tab === 'dependencies' && (
-          <div className="panel">
-            <div className="action-grid">
-              <div className="action-card">
-                <div className="action-card-body">
-                  <h3>OVMS Server</h3>
-                  <p>Downloads and extracts the OpenVINO Model Server for Windows.</p>
-                </div>
-                <button className="btn-primary" disabled={running || status.ovms_ready} onClick={() => run(PrepareOVMS)}>
-                  {running ? 'Running…' : 'Prepare OVMS'}
-                </button>
-              </div>
-
-              <div className="action-card">
-                <div className="action-card-body">
-                  <h3>Export Environment</h3>
-                  <p>Installs ML export requirements into the OVMS bundled Python. Requires OVMS to be ready.</p>
-                </div>
-                <button
-                  className="btn-primary"
-                  disabled={running || !status.ovms_ready || status.deps_ready}
-                  onClick={() => run(PrepareExport)}
-                >
-                  {running ? 'Running…' : 'Prepare Export'}
-                </button>
-              </div>
-            </div>
-
-            {(logs.length > 0 || error) && (
-              <div className="log-section">
-                {error && <div className="error">{error}</div>}
-                <div className="log-box">
-                  {logs.map((line, i) => (
-                    <div key={i} className={line.startsWith('---') ? 'log-done' : 'log-line'}>{line}</div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
         {tab === 'server' && (
           <div className="panel">
-            {!allReady
-              ? <NotReady onGo={() => setTab('dependencies')} />
-              : (
-                <>
-                  <div className="action-card">
+            <div className="action-card">
                     <div className="action-card-body">
                       <h3>OVMS Server</h3>
                       <p>Start the OpenVINO Model Server on port 9000 (REST 8080).</p>
@@ -361,19 +337,13 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                </>
-              )
-            }
           </div>
         )}
 
         {tab === 'models' && (
           <div className="panel">
-            {!allReady
-              ? <NotReady onGo={() => setTab('dependencies')} />
-              : (
-                <>
-                  {installedModels.length > 0 && (
+            <>
+              {installedModels.length > 0 && (
                     <div className="installed-models-section">
                       <h3>Available Models</h3>
                       <div className="installed-models-list">
@@ -518,9 +488,7 @@ export default function App() {
                       <div ref={logsEndRef} />
                     </div>
                   </div>
-                </>
-              )
-            }
+            </>
           </div>
         )}
 
@@ -547,15 +515,6 @@ export default function App() {
                 <small>URL to the OVMS zip archive for Windows.</small>
               </div>
 
-              <div className="field">
-                <label>Export Requirements URL</label>
-                <input
-                  value={config.export_requirements_url}
-                  onChange={e => setConfig(c => ({ ...c, export_requirements_url: e.target.value }))}
-                  placeholder="https://raw.githubusercontent.com/openvinotoolkit/model_server/…/requirements.txt"
-                />
-                <small>URL to the requirements.txt installed into the OVMS bundled Python for model export.</small>
-              </div>
             </div>
 
             <div className="field">
@@ -636,10 +595,7 @@ export default function App() {
             </label>
 
             <div className="reset-row">
-              <button className="btn-reset" disabled={running} onClick={() => run(ResetExport)}>
-                Reset Export
-              </button>
-              <button className="btn-reset" disabled={running} onClick={() => run(ResetOVMS)}>
+              <button className="btn-reset" disabled={running} onClick={handleReset}>
                 Reset OVMS
               </button>
             </div>

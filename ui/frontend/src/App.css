@@ -706,15 +706,18 @@ body {
 
 .progress-fill {
   height: 100%;
-  width: 40%;
+  width: 0%;
   background: #1d6ed8;
   border-radius: 2px;
-  animation: progress-slide 1.4s ease-in-out infinite;
+  transition: width 0.4s ease;
 }
 
-@keyframes progress-slide {
-  0%   { transform: translateX(-150%); }
-  100% { transform: translateX(350%); }
+.progress-label {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: right;
+  margin-top: 4px;
+  min-height: 16px;
 }
 
 .loading-log {

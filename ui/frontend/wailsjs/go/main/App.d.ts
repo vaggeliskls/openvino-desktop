@@ -18,8 +18,6 @@ export function GetStartupEnabled():Promise<boolean>;
 
 export function IsOVMSRunning():Promise<boolean>;
 
-export function PrepareExport():Promise<void>;
-
 export function PrepareOVMS():Promise<void>;
 
 export function PullModel(arg1:string,arg2:string):Promise<void>;

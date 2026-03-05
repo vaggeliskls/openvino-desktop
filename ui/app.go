@@ -102,15 +102,18 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
-func configPath() string {
+func defaultInstallDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".openvino-desk", "config.json")
+	return filepath.Join(home, "openvino-desktop")
+}
+
+func configPath() string {
+	return filepath.Join(defaultInstallDir(), "settings.json")
 }
 
 func defaultConfig() Config {
-	home, _ := os.UserHomeDir()
 	return Config{
-		InstallDir:             filepath.Join(home, "openvino-desk"),
+		InstallDir:             defaultInstallDir(),
 		OvmsURL:                defaultOvmsURL,
 		SearchTags:             defaultSearchTags,
 		PipelineFilters:        defaultPipelineFilters,
@@ -124,6 +127,7 @@ func (a *App) loadConfig() {
 	data, err := os.ReadFile(configPath())
 	if err != nil {
 		a.config = defaultConfig()
+		a.SaveConfig(a.config) //nolint: errcheck — create settings.json with defaults on first run
 		return
 	}
 	if err := json.Unmarshal(data, &a.config); err != nil {

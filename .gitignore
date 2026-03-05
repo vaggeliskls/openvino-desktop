@@ -2,8 +2,7 @@ export/
 python/
 export-windows.zip
 ovms/
-ui/assets/uv.exe
 ui/build/
-ui/assets
 dist
 node_modules
+.DS_Store

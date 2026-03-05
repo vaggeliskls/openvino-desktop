@@ -7,15 +7,11 @@ import (
 )
 
 const (
-	ovmsTmpZip    = "ovms-tmp.zip"
-	exportTmpZip  = "export-tmp.zip"
-	ovmsDir       = "ovms"
-	exportZipURL  = "https://github.com/vaggeliskls/openvino-desk/releases/download/export-v2026.0/export-v2026.0-windows-x64.zip"
+	ovmsTmpZip = "ovms-tmp.zip"
+	ovmsDir    = "ovms"
 )
 
-// PrepareOVMS downloads and extracts the OVMS server into installDir,
-// then downloads the export bundle (site-packages + export_model.py) and
-// installs it into the OVMS Python environment.
+// PrepareOVMS downloads and extracts the OVMS server into installDir.
 func PrepareOVMS(installDir, ovmsURL string, log LogFunc) error {
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return fmt.Errorf("create install dir: %w", err)
@@ -42,26 +38,42 @@ func PrepareOVMS(installDir, ovmsURL string, log LogFunc) error {
 	}
 	os.Remove(tmpZip)
 	log("OVMS ready at " + ovmsDest)
+	return nil
+}
 
-	exportTmp := filepath.Join(installDir, exportTmpZip)
-	log("Downloading export bundle...")
-	if err := downloadFile(exportZipURL, exportTmp); err != nil {
-		return fmt.Errorf("download export bundle: %w", err)
+// PrepareExport creates a uv venv using the OVMS-bundled Python and installs
+// the export requirements into it, then writes the .deps-ready marker.
+func PrepareExport(installDir string, log LogFunc) error {
+	uvExe := filepath.Join(installDir, "uv.exe")
+	ovmsPython := filepath.Join(installDir, ovmsDir, "python", "python.exe")
+	requirementsPath := filepath.Join(installDir, "export-model-requirements", "requirements.txt")
+
+	if _, err := os.Stat(uvExe); err != nil {
+		return fmt.Errorf("uv.exe not found at %s", uvExe)
+	}
+	if _, err := os.Stat(ovmsPython); err != nil {
+		return fmt.Errorf("OVMS python not found at %s — run Prepare OVMS first", ovmsPython)
+	}
+	if _, err := os.Stat(requirementsPath); err != nil {
+		return fmt.Errorf("requirements.txt not found at %s", requirementsPath)
 	}
 
-	pythonLibDir := filepath.Join(ovmsDest, "python", "Lib")
-	log("Installing export bundle...")
-	if err := unzip(exportTmp, pythonLibDir); err != nil {
-		os.Remove(exportTmp)
-		return fmt.Errorf("extract export bundle: %w", err)
+	venvDir := filepath.Join(installDir, "export")
+	log("Creating export venv using OVMS Python...")
+	if err := RunScript(installDir, log, uvExe, "venv", venvDir, "--python", ovmsPython); err != nil {
+		return fmt.Errorf("uv venv: %w", err)
 	}
-	os.Remove(exportTmp)
+
+	log("Installing export dependencies...")
+	if err := RunScript(installDir, log, uvExe, "pip", "install", "--python", ovmsPython, "-r", requirementsPath); err != nil {
+		return fmt.Errorf("uv pip install: %w", err)
+	}
 
 	marker := filepath.Join(installDir, ".deps-ready")
 	if err := os.WriteFile(marker, []byte("ready"), 0644); err != nil {
 		return fmt.Errorf("write deps marker: %w", err)
 	}
 
-	log("Setup complete.")
+	log("Export environment ready.")
 	return nil
 }

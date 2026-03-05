@@ -20,9 +20,7 @@ export function IsOVMSRunning():Promise<boolean>;
 
 export function PrepareOVMS():Promise<void>;
 
-export function PullModel(arg1:string,arg2:string):Promise<void>;
-
-export function ResetExport():Promise<void>;
+export function PullModel(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ResetOVMS():Promise<void>;
 

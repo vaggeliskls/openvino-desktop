@@ -420,7 +420,7 @@ export default function App() {
                           ))}
                         </select>
 
-                        {selectedModel && !isSelectedOV && (
+                        {selectedModel && (
                           <div className="export-opts">
                             <label>Target Device
                               <select value={targetDevice} onChange={e => setTargetDevice(e.target.value)}>
@@ -429,20 +429,22 @@ export default function App() {
                                 <option>NPU</option>
                               </select>
                             </label>
-                            <label style={{marginTop: 10}}>Extra Options
-                              <textarea
-                                className={`opts-raw-editor${extraOptsError ? ' opts-editor-error' : ''}`}
-                                style={{minHeight: 80, maxHeight: 180}}
-                                value={extraOptsText}
-                                spellCheck={false}
-                                onChange={e => {
-                                  setExtraOptsText(e.target.value)
-                                  try { JSON.parse(e.target.value); setExtraOptsError(false) }
-                                  catch { setExtraOptsError(true) }
-                                }}
-                              />
-                              {extraOptsError && <div className="opts-editor-error-msg">Invalid JSON</div>}
-                            </label>
+                            {!isSelectedOV && (
+                              <label style={{marginTop: 10}}>Extra Options
+                                <textarea
+                                  className={`opts-raw-editor${extraOptsError ? ' opts-editor-error' : ''}`}
+                                  style={{minHeight: 80, maxHeight: 180}}
+                                  value={extraOptsText}
+                                  spellCheck={false}
+                                  onChange={e => {
+                                    setExtraOptsText(e.target.value)
+                                    try { JSON.parse(e.target.value); setExtraOptsError(false) }
+                                    catch { setExtraOptsError(true) }
+                                  }}
+                                />
+                                {extraOptsError && <div className="opts-editor-error-msg">Invalid JSON</div>}
+                              </label>
+                            )}
                           </div>
                         )}
 
@@ -452,7 +454,7 @@ export default function App() {
                             disabled={running || !selectedModel || extraOptsError}
                             onClick={() => {
                               if (isSelectedOV) {
-                                run(() => PullModel(selectedModel, targetDevice))
+                                run(() => PullModel(selectedModel, targetDevice, selectedModelInfo?.pipeline_tag ?? ''))
                               } else {
                                 const extraOpts = (() => { try { return JSON.parse(extraOptsText) } catch { return {} } })()
                                 const tag = selectedModelInfo?.pipeline_tag

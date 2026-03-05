@@ -217,8 +217,21 @@ func (a *App) SearchModels(query string, filters []string) ([]HFModel, error) {
 	return merged, nil
 }
 
+// pipelineTagToTask maps a Hugging Face pipeline_tag to the OVMS --task value.
+func pipelineTagToTask(tag string) string {
+	switch tag {
+	case "text-generation":
+		return "text_generation"
+	case "feature-extraction":
+		return "embeddings"
+	default:
+		return ""
+	}
+}
+
 // PullModel downloads an OpenVINO model from Hugging Face using OVMS --pull.
-func (a *App) PullModel(modelID, targetDevice string) error {
+// pipelineTag is the HF pipeline_tag (e.g. "text-generation", "feature-extraction").
+func (a *App) PullModel(modelID, targetDevice, pipelineTag string) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
@@ -242,6 +255,11 @@ func (a *App) PullModel(modelID, targetDevice string) error {
 		"--model_repository_path", modelsDir,
 		"--model_name", modelID,
 	}
+	task := pipelineTagToTask(pipelineTag)
+	if task == "" {
+		return fmt.Errorf("unsupported pipeline tag %q: must be text-generation or feature-extraction", pipelineTag)
+	}
+	args = append(args, "--task", task)
 
 	cmd := exec.Command(ovmsExe, args...)
 	cmd.Dir = ovmsDirPath
@@ -254,16 +272,16 @@ func (a *App) PullModel(modelID, targetDevice string) error {
 }
 
 // ExportTextGen exports a text-generation model using export_model.py.
-func (a *App) ExportTextGen(modelID, targetDevice string, extraOpts map[string]interface{}) error {
-	return a.exportWithScript(modelID, "text_generation", targetDevice, extraOpts)
+func (a *App) ExportTextGen(modelID, targetDevice string, extraOpts map[string]any) error {
+	return a.exportWithScript(modelID, "text_generation", extraOpts)
 }
 
 // ExportEmbeddings exports an embeddings model using export_model.py.
-func (a *App) ExportEmbeddings(modelID, targetDevice string, extraOpts map[string]interface{}) error {
-	return a.exportWithScript(modelID, "embeddings_ov", targetDevice, extraOpts)
+func (a *App) ExportEmbeddings(modelID, targetDevice string, extraOpts map[string]any) error {
+	return a.exportWithScript(modelID, "embeddings_ov", extraOpts)
 }
 
-func (a *App) exportWithScript(modelID, task, targetDevice string, extraOpts map[string]interface{}) error {
+func (a *App) exportWithScript(modelID, task string, extraOpts map[string]any) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
@@ -273,10 +291,10 @@ func (a *App) exportWithScript(modelID, task, targetDevice string, extraOpts map
 
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
 	pythonExe := filepath.Join(ovmsDirPath, "python", "python.exe")
-	scriptPath := filepath.Join(ovmsDirPath, "python", "Lib", "export_model.py")
+	scriptPath := filepath.Join(a.config.InstallDir, "export-model-requirements", "export_model.py")
 
 	if _, err := os.Stat(pythonExe); err != nil {
-		return fmt.Errorf("python not found at %s", pythonExe)
+		return fmt.Errorf("python not found at %s — run Prepare OVMS first", pythonExe)
 	}
 	if _, err := os.Stat(scriptPath); err != nil {
 		return fmt.Errorf("export_model.py not found at %s", scriptPath)
@@ -313,12 +331,7 @@ func (a *App) exportWithScript(modelID, task, targetDevice string, extraOpts map
 	cmd.Dir = ovmsDirPath
 	cmd.Env = buildOVMSEnv(ovmsDirPath)
 
-	if err := a.streamCmd(cmd); err != nil {
-		return err
-	}
-
-	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
-	return a.ovmsAddToConfig(ovmsExe, ovmsDirPath, modelID, modelsDir, targetDevice)
+	return a.streamCmd(cmd)
 }
 
 func (a *App) ovmsAddToConfig(ovmsExe, ovmsDirPath, modelID, modelsDir, targetDevice string) error {
@@ -393,34 +406,6 @@ func (a *App) streamLogReader(r io.Reader) {
 	}
 }
 
-// addModelToConfig upserts a model entry in config.json.
-func (a *App) addModelToConfig(modelName, basePath, targetDevice string) error {
-	cfgPath := filepath.Join(a.config.InstallDir, "config.json")
-
-	var cfg OVMSConfig
-	data, err := os.ReadFile(cfgPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read config.json: %w", err)
-	}
-	if err == nil {
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("parse config.json: %w", err)
-		}
-	}
-
-	for i := range cfg.ModelConfigList {
-		if cfg.ModelConfigList[i].Config.Name == modelName {
-			cfg.ModelConfigList[i].Config.BasePath = basePath
-			cfg.ModelConfigList[i].Config.TargetDevice = targetDevice
-			return writeOVMSConfig(cfgPath, cfg)
-		}
-	}
-
-	cfg.ModelConfigList = append(cfg.ModelConfigList, OVMSConfigEntry{
-		Config: OVMSModelConfig{Name: modelName, BasePath: basePath, TargetDevice: targetDevice},
-	})
-	return writeOVMSConfig(cfgPath, cfg)
-}
 
 func writeOVMSConfig(cfgPath string, cfg OVMSConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -428,15 +413,6 @@ func writeOVMSConfig(cfgPath string, cfg OVMSConfig) error {
 		return fmt.Errorf("marshal config.json: %w", err)
 	}
 	return os.WriteFile(cfgPath, data, 0644)
-}
-
-// ResetExport removes the deps-ready marker so PrepareExport will re-run.
-func (a *App) ResetExport() error {
-	marker := filepath.Join(a.config.InstallDir, ".deps-ready")
-	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove marker: %w", err)
-	}
-	return nil
 }
 
 // ResetOVMS removes the OVMS server directory and the deps-ready marker.
@@ -463,7 +439,10 @@ func (a *App) PrepareOVMS() error {
 	if a.config.OvmsURL == "" {
 		return fmt.Errorf("OVMS download URL is not configured")
 	}
-	return setup.PrepareOVMS(a.config.InstallDir, a.config.OvmsURL, a.emit)
+	if err := setup.PrepareOVMS(a.config.InstallDir, a.config.OvmsURL, a.emit); err != nil {
+		return err
+	}
+	return setup.PrepareExport(a.config.InstallDir, a.emit)
 }
 
 // buildOVMSEnv constructs the process environment for running ovms.exe.
@@ -598,7 +577,7 @@ type OVMSModelConfig struct {
 	Name         string                 `json:"name"`
 	BasePath     string                 `json:"base_path"`
 	TargetDevice string                 `json:"target_device,omitempty"`
-	PluginConfig map[string]interface{} `json:"plugin_config,omitempty"`
+	PluginConfig map[string]any `json:"plugin_config,omitempty"`
 	Nireq        int                    `json:"nireq,omitempty"`
 }
 

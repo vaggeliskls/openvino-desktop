@@ -38,12 +38,9 @@ export function PrepareOVMS() {
   return window['go']['main']['App']['PrepareOVMS']();
 }
 
-export function PullModel(arg1, arg2) {
-  return window['go']['main']['App']['PullModel'](arg1, arg2);
-}
-
-export function ResetExport() {
-  return window['go']['main']['App']['ResetExport']();
+/** @param {string} arg1 @param {string} arg2 @param {string} arg3 */
+export function PullModel(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PullModel'](arg1, arg2, arg3);
 }
 
 export function ResetOVMS() {

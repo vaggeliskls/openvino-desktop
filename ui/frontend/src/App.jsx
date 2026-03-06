@@ -25,6 +25,7 @@ export default function App() {
   const [config, setConfig] = useState({
     install_dir: '',
     ovms_url: '',
+    uv_url: '',
     search_tags: [],
     pipeline_filters: [],
     search_limit: 30,
@@ -515,6 +516,16 @@ export default function App() {
                   placeholder="https://github.com/openvinotoolkit/model_server/releases/download/…/ovms_windows_python_on.zip"
                 />
                 <small>URL to the OVMS zip archive for Windows.</small>
+              </div>
+
+              <div className="field">
+                <label>uv Download URL</label>
+                <input
+                  value={config.uv_url}
+                  onChange={e => setConfig(c => ({ ...c, uv_url: e.target.value }))}
+                  placeholder="https://github.com/turintech/openvino-desktop/releases/download/uv/uv.exe"
+                />
+                <small>URL to download uv.exe used for setting up the export environment.</small>
               </div>
 
             </div>

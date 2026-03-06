@@ -17,12 +17,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/vaggeliskls/openvino-desktop/ui/internal/setup"
+	"github.com/turintech/openvino-desktop/ui/internal/setup"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
 	defaultOvmsURL = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.0/ovms_windows_python_on.zip"
+	defaultUvURL   = "https://github.com/turintech/openvino-desktop/releases/download/uv/uv.exe"
 )
 
 // Config holds user-configurable settings.
@@ -32,6 +33,7 @@ var defaultPipelineFilters = []string{"text-generation", "feature-extraction"}
 type Config struct {
 	InstallDir             string   `json:"install_dir"`
 	OvmsURL                string   `json:"ovms_url"`
+	UvURL                  string   `json:"uv_url"`
 	StartupSet             bool     `json:"startup_set"`
 	SearchTags             []string `json:"search_tags"`
 	PipelineFilters        []string `json:"pipeline_filters"`
@@ -115,6 +117,7 @@ func defaultConfig() Config {
 	return Config{
 		InstallDir:             defaultInstallDir(),
 		OvmsURL:                defaultOvmsURL,
+		UvURL:                  defaultUvURL,
 		SearchTags:             defaultSearchTags,
 		PipelineFilters:        defaultPipelineFilters,
 		SearchLimit:            30,
@@ -136,6 +139,9 @@ func (a *App) loadConfig() {
 	}
 	if a.config.OvmsURL == "" {
 		a.config.OvmsURL = defaultOvmsURL
+	}
+	if a.config.UvURL == "" {
+		a.config.UvURL = defaultUvURL
 	}
 	if len(a.config.SearchTags) == 0 {
 		a.config.SearchTags = defaultSearchTags
@@ -470,7 +476,7 @@ func (a *App) PrepareOVMS() error {
 	if err := setup.PrepareOVMS(a.config.InstallDir, a.config.OvmsURL, a.emit); err != nil {
 		return err
 	}
-	return setup.PrepareExport(a.config.InstallDir, a.emit)
+	return setup.PrepareExport(a.config.InstallDir, a.config.UvURL, a.emit)
 }
 
 // buildOVMSEnv constructs the process environment for running ovms.exe.

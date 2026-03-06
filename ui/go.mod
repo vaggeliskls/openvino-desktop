@@ -1,4 +1,4 @@
-module github.com/vaggeliskls/openvino-desktop/ui
+module github.com/turintech/openvino-desktop/ui
 
 go 1.23.0
 

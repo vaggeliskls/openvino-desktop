@@ -3,6 +3,7 @@ export namespace main {
 	export class Config {
 	    install_dir: string;
 	    ovms_url: string;
+	    uv_url: string;
 	    startup_set: boolean;
 	    search_tags: string[];
 	    pipeline_filters: string[];
@@ -18,6 +19,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.install_dir = source["install_dir"];
 	        this.ovms_url = source["ovms_url"];
+	        this.uv_url = source["uv_url"];
 	        this.startup_set = source["startup_set"];
 	        this.search_tags = source["search_tags"];
 	        this.pipeline_filters = source["pipeline_filters"];

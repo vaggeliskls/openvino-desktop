@@ -9,7 +9,7 @@ import (
 const (
 	ovmsTmpZip = "ovms-tmp.zip"
 	ovmsDir    = "ovms"
-	uvURL      = "https://github.com/vaggeliskls/openvino-desktop/raw/refs/heads/main/scripts/uv.exe"
+	uvURL      = "https://github.com/turintech/openvino-desktop/releases/download/uv/uv.exe"
 )
 
 // PrepareOVMS downloads and extracts the OVMS server into installDir.
@@ -44,14 +44,20 @@ func PrepareOVMS(installDir, ovmsURL string, log LogFunc) error {
 
 // PrepareExport creates a uv venv using the OVMS-bundled Python and installs
 // the export requirements into it, then writes the .deps-ready marker.
-func PrepareExport(installDir string, log LogFunc) error {
+// uvDownloadURL overrides the default uv.exe download URL when non-empty.
+func PrepareExport(installDir, uvDownloadURL string, log LogFunc) error {
 	uvExe := filepath.Join(installDir, "uv.exe")
 	ovmsPython := filepath.Join(installDir, ovmsDir, "python", "python.exe")
 	requirementsPath := filepath.Join(installDir, "export-model-requirements", "requirements.txt")
 
+	downloadURL := uvURL
+	if uvDownloadURL != "" {
+		downloadURL = uvDownloadURL
+	}
+
 	if _, err := os.Stat(uvExe); err != nil {
 		log("Downloading uv...")
-		if err := downloadFile(uvURL, uvExe); err != nil {
+		if err := downloadFile(downloadURL, uvExe); err != nil {
 			return fmt.Errorf("download uv.exe: %w", err)
 		}
 	}

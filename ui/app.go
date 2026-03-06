@@ -96,6 +96,10 @@ func (a *App) extractAssets() error {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.loadConfig()
+	// Kill any orphaned ovms.exe left by a previous process (e.g. wails dev hot-reload).
+	tk := exec.Command("taskkill", "/F", "/T", "/IM", "ovms.exe")
+	hideWindow(tk)
+	tk.Run() //nolint: errcheck
 	a.extractAssets() //nolint: errcheck — best-effort on startup
 	// On first run, register the app to start with Windows by default.
 	if !a.config.StartupSet {
@@ -797,6 +801,8 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 		a.emit("Warning: could not fully remove model directory: " + removeErr.Error())
 	}
 
-	a.StartOVMS() //nolint: errcheck
+	if len(newList) > 0 {
+		a.StartOVMS() //nolint: errcheck
+	}
 	return nil
 }

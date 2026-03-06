@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -25,6 +28,7 @@ func (a *App) startAPIServer(ctx context.Context) {
 
 	mux.HandleFunc("GET /status", a.apiStatus)
 	mux.HandleFunc("GET /models", a.apiModels)
+	mux.HandleFunc("GET /models/test", a.apiTestModels)
 	mux.HandleFunc("POST /models/pull", a.apiPull)
 	mux.HandleFunc("POST /models/export", a.apiExport)
 	mux.HandleFunc("GET /job", apiJobStatus)
@@ -135,6 +139,72 @@ func (a *App) apiExport(w http.ResponseWriter, r *http.Request) {
 		globalJob.mu.Unlock()
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// ovmsPost sends a JSON request to OVMS and returns the decoded response body.
+func ovmsPost(url string, payload any) (int, json.RawMessage, error) {
+	body, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint: noctx
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, json.RawMessage(raw), nil
+}
+
+// apiTestModels tests all installed models with a "hello" prompt.
+// It auto-detects the model type: names containing "embed" use the embeddings
+// endpoint; all others use chat completions.
+func (a *App) apiTestModels(w http.ResponseWriter, _ *http.Request) {
+	models, err := a.GetInstalledModels()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ovmsBase := "http://localhost:" + strconv.Itoa(a.config.OVMSRestPort)
+	type result struct {
+		Model    string          `json:"model"`
+		Type     string          `json:"type"`
+		Status   int             `json:"status"`
+		Response json.RawMessage `json:"response,omitempty"`
+		Error    string          `json:"error,omitempty"`
+	}
+
+	results := make([]result, 0, len(models))
+	for _, m := range models {
+		var (
+			url     string
+			payload any
+			mtype   string
+		)
+		if containsFold(m.Name, "embed") {
+			mtype = "embeddings"
+			url = ovmsBase + "/v3/embeddings"
+			payload = map[string]any{"model": m.Name, "input": "hello"}
+		} else {
+			mtype = "text-generation"
+			url = ovmsBase + "/v3/chat/completions"
+			payload = map[string]any{
+				"model":      m.Name,
+				"max_tokens": 50,
+				"messages":   []map[string]string{{"role": "user", "content": "hello"}},
+			}
+		}
+		code, raw, reqErr := ovmsPost(url, payload)
+		r := result{Model: m.Name, Type: mtype, Status: code, Response: raw}
+		if reqErr != nil {
+			r.Error = reqErr.Error()
+		}
+		results = append(results, r)
+	}
+
+	writeJSON(w, http.StatusOK, results)
+}
+
+func containsFold(s, sub string) bool {
+	return len(s) >= len(sub) && strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }
 
 func apiJobStatus(w http.ResponseWriter, _ *http.Request) {

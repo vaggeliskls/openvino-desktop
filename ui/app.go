@@ -42,6 +42,7 @@ type Config struct {
 	TextGenTargetDevice    string   `json:"text_gen_target_device"`
 	EmbeddingsTargetDevice string   `json:"embeddings_target_device"`
 	APIPort                int      `json:"api_port"`
+	OVMSRestPort           int      `json:"ovms_rest_port"`
 }
 
 // StatusResult reports whether each component is ready.
@@ -131,6 +132,7 @@ func defaultConfig() Config {
 		TextGenTargetDevice:    "GPU",
 		EmbeddingsTargetDevice: "GPU",
 		APIPort:                3333,
+		OVMSRestPort:           8080,
 	}
 }
 
@@ -168,6 +170,9 @@ func (a *App) loadConfig() {
 	}
 	if a.config.APIPort == 0 {
 		a.config.APIPort = 3333
+	}
+	if a.config.OVMSRestPort == 0 {
+		a.config.OVMSRestPort = 8080
 	}
 }
 
@@ -640,7 +645,7 @@ func (a *App) StartOVMS() error {
 	modelsDir := filepath.Join(a.config.InstallDir, "models")
 	os.MkdirAll(modelsDir, 0755) //nolint: errcheck
 
-	args := []string{"--port", "9000", "--rest_port", "8080", "--config_path", ovmsCfg}
+	args := []string{"--port", "9000", "--rest_port", strconv.Itoa(a.config.OVMSRestPort), "--config_path", ovmsCfg}
 	a.emitServerLog("$ " + ovmsExe + " " + strings.Join(args, " "))
 	cmd := exec.Command(ovmsExe, args...)
 	cmd.Dir = ovmsDirPath

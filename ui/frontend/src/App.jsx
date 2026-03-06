@@ -27,6 +27,7 @@ export default function App() {
     ovms_url: '',
     uv_url: '',
     api_port: 3333,
+    ovms_rest_port: 8080,
     search_tags: [],
     pipeline_filters: [],
     search_limit: 30,
@@ -324,7 +325,7 @@ export default function App() {
             <div className="action-card">
                     <div className="action-card-body">
                       <h3>OVMS Server</h3>
-                      <p>Start the OpenVINO Model Server on port 9000 (REST 8080).</p>
+                      <p>Start the OpenVINO Model Server on port 9000 (REST {config.ovms_rest_port || 8080}).</p>
                     </div>
                     <div className="server-controls">
                       {!serverRunning
@@ -556,6 +557,18 @@ export default function App() {
                   onChange={e => setConfig(c => ({ ...c, api_port: parseInt(e.target.value) || 3333 }))}
                 />
                 <small>Port for the local REST API (default: 3333). Requires restart to take effect.</small>
+              </div>
+
+              <div className="field">
+                <label>OVMS REST Port</label>
+                <input
+                  type="number"
+                  min="1024"
+                  max="65535"
+                  value={config.ovms_rest_port}
+                  onChange={e => setConfig(c => ({ ...c, ovms_rest_port: parseInt(e.target.value) || 8080 }))}
+                />
+                <small>Port the OVMS inference server listens on (default: 8080). Requires restart to take effect.</small>
               </div>
 
             </div>

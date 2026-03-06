@@ -10,6 +10,8 @@ export function ExportEmbeddings(arg1:string,arg2:string,arg3:Record<string, any
 
 export function ExportTextGen(arg1:string,arg2:string,arg3:Record<string, any>):Promise<void>;
 
+export function GetAvailableDevices():Promise<Array<string>>;
+
 export function GetConfig():Promise<main.Config>;
 
 export function GetInstalledModels():Promise<Array<main.ModelInfo>>;

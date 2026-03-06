@@ -18,6 +18,10 @@ export function ExportTextGen(arg1, arg2, arg3) {
   return window['go']['main']['App']['ExportTextGen'](arg1, arg2, arg3);
 }
 
+export function GetAvailableDevices() {
+  return window['go']['main']['App']['GetAvailableDevices']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }

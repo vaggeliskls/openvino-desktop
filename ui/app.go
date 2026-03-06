@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/turintech/openvino-desktop/ui/internal/setup"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -177,6 +178,33 @@ func (a *App) SaveConfig(config Config) error {
 		return err
 	}
 	return os.WriteFile(configPath(), data, 0644)
+}
+
+// GetAvailableDevices returns the OpenVINO devices visible to the bundled Python.
+func (a *App) GetAvailableDevices() []string {
+	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
+	pythonExe := filepath.Join(ovmsDirPath, "python", "python.exe")
+	if _, err := os.Stat(pythonExe); err != nil {
+		return []string{"CPU", "GPU", "NPU", "AUTO"}
+	}
+	cmd := exec.Command(pythonExe, "-c",
+		"from openvino import Core; print(','.join(Core().available_devices))")
+	cmd.Env = buildOVMSEnv(ovmsDirPath)
+	hideWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return []string{"CPU", "GPU", "NPU", "AUTO"}
+	}
+	var devices []string
+	for _, d := range strings.Split(strings.TrimSpace(string(out)), ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			devices = append(devices, d)
+		}
+	}
+	if len(devices) == 0 {
+		return []string{"CPU", "GPU", "NPU", "AUTO"}
+	}
+	return devices
 }
 
 // CheckStatus reports whether the export deps and OVMS are present.
@@ -393,7 +421,44 @@ func (a *App) ovmsAddToConfig(_, _, modelID, modelsDir, targetDevice string) err
 		},
 	})
 	a.emit("Adding " + modelID + " to config.json")
-	return writeOVMSConfig(cfgPath, cfg)
+	if err := writeOVMSConfig(cfgPath, cfg); err != nil {
+		return err
+	}
+	a.restartOVMSIfRunning()
+	return nil
+}
+
+// stopAndWait kills the OVMS process (if running) and blocks until it exits.
+func (a *App) stopAndWait() {
+	a.ovmsMu.Lock()
+	if a.ovmsProc == nil {
+		a.ovmsMu.Unlock()
+		return
+	}
+	a.ovmsProc.Process.Kill() //nolint: errcheck
+	a.ovmsMu.Unlock()
+
+	for {
+		a.ovmsMu.Lock()
+		done := a.ovmsProc == nil
+		a.ovmsMu.Unlock()
+		if done {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// restartOVMSIfRunning restarts the OVMS server if it is currently running.
+func (a *App) restartOVMSIfRunning() {
+	a.ovmsMu.Lock()
+	running := a.ovmsProc != nil
+	a.ovmsMu.Unlock()
+	if !running {
+		return
+	}
+	a.stopAndWait()
+	a.StartOVMS() //nolint: errcheck
 }
 
 func (a *App) streamCmd(cmd *exec.Cmd) error {
@@ -667,10 +732,13 @@ func (a *App) GetInstalledModels() ([]ModelInfo, error) {
 }
 
 // DeleteInstalledModel removes a model from config.json and deletes its files.
+// If the OVMS server is running it is stopped first and restarted after.
 func (a *App) DeleteInstalledModel(modelName string) error {
 	if modelName == "" {
 		return fmt.Errorf("model name is required")
 	}
+
+	a.stopAndWait()
 
 	cfgPath := filepath.Join(a.config.InstallDir, "config.json")
 	data, err := os.ReadFile(cfgPath)
@@ -709,5 +777,9 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 	}
 
 	ovmsConfig.ModelConfigList = newList
-	return writeOVMSConfig(cfgPath, ovmsConfig)
+	if err := writeOVMSConfig(cfgPath, ovmsConfig); err != nil {
+		return err
+	}
+	a.StartOVMS() //nolint: errcheck
+	return nil
 }

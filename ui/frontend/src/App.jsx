@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel } from '../wailsjs/go/main/App'
+import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel, GetAvailableDevices } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
 const PROGRESS_MAP = {
@@ -49,6 +49,7 @@ export default function App() {
   const [serverLogs, setServerLogs] = useState([])
 
   const [targetDevice, setTargetDevice] = useState('GPU')
+  const [availableDevices, setAvailableDevices] = useState(['CPU', 'GPU', 'NPU', 'AUTO'])
   const [extraOptsText, setExtraOptsText] = useState('{\n  "weight-format": "int8"\n}')
   const [extraOptsError, setExtraOptsError] = useState(false)
 
@@ -99,6 +100,11 @@ export default function App() {
       setStartup(su)
     })
 
+    const refreshDevices = () =>
+      GetAvailableDevices().then(devices => {
+        if (devices && devices.length > 0) setAvailableDevices(devices)
+      })
+
     const autoStart = async () => {
       for (let i = 0; i < 3; i++) {
         try { await StartOVMS(); return } catch {}
@@ -109,6 +115,7 @@ export default function App() {
     CheckStatus().then(async s => {
       setStatus(s)
       if (s.deps_ready && s.ovms_ready) {
+        refreshDevices()
         autoStart()
         return
       }
@@ -119,6 +126,7 @@ export default function App() {
         const s2 = await CheckStatus()
         setStatus(s2)
         setLogs([])
+        refreshDevices()
         autoStart()
       } catch (err) {
         setInitError(String(err))
@@ -304,6 +312,9 @@ export default function App() {
       <main className="tab-content">
         {tab === 'server' && (
           <div className="panel">
+            <div className="devices-info">
+              <small>Available OpenVINO devices: <strong>{availableDevices.join(', ')}</strong></small>
+            </div>
             <div className="action-card">
                     <div className="action-card-body">
                       <h3>OVMS Server</h3>
@@ -343,6 +354,9 @@ export default function App() {
 
         {tab === 'models' && (
           <div className="panel">
+            <div className="devices-info">
+              <small>Available OpenVINO devices: <strong>{availableDevices.join(', ')}</strong></small>
+            </div>
             <>
               {installedModels.length > 0 && (
                     <div className="installed-models-section">
@@ -425,9 +439,10 @@ export default function App() {
                           <div className="export-opts">
                             <label>Target Device
                               <select value={targetDevice} onChange={e => setTargetDevice(e.target.value)}>
-                                <option>GPU</option>
                                 <option>CPU</option>
+                                <option>GPU</option>
                                 <option>NPU</option>
+                                <option>AUTO</option>
                               </select>
                             </label>
                             {!isSelectedOV && (

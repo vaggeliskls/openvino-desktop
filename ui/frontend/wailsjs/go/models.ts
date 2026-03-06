@@ -56,6 +56,7 @@ export namespace main {
 	    name: string;
 	    base_path: string;
 	    target_device: string;
+	    task?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ModelInfo(source);
@@ -66,6 +67,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.base_path = source["base_path"];
 	        this.target_device = source["target_device"];
+	        this.task = source["task"];
 	    }
 	}
 	export class StatusResult {

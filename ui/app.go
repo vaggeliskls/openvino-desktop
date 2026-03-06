@@ -292,16 +292,17 @@ func (a *App) SearchModels(query string, filters []string) ([]HFModel, error) {
 	return merged, nil
 }
 
-// pipelineTagToTask maps a Hugging Face pipeline_tag to the OVMS --task value.
-func pipelineTagToTask(tag string) string {
-	switch tag {
-	case "text-generation":
-		return "text_generation"
-	case "feature-extraction":
-		return "embeddings"
-	default:
-		return ""
-	}
+// pipelineDef describes how each HuggingFace pipeline_tag maps to OVMS operations.
+type pipelineDef struct {
+	PullTask    string // --task arg for `ovms --pull`
+	ExportTask  string // positional arg for export_model.py
+	IsEmbedding bool   // true → use /v3/embeddings endpoint for testing
+}
+
+// pipelineDefs is the single source of truth for supported pipeline types.
+var pipelineDefs = map[string]pipelineDef{
+	"text-generation":    {PullTask: "text_generation", ExportTask: "text_generation", IsEmbedding: false},
+	"feature-extraction": {PullTask: "embeddings", ExportTask: "embeddings_ov", IsEmbedding: true},
 }
 
 // PullModel downloads an OpenVINO model from Hugging Face using OVMS --pull.
@@ -312,6 +313,11 @@ func (a *App) PullModel(modelID, targetDevice, pipelineTag string) error {
 	}
 	if modelID == "" {
 		return fmt.Errorf("no model selected")
+	}
+
+	def, ok := pipelineDefs[pipelineTag]
+	if !ok {
+		return fmt.Errorf("unsupported pipeline tag %q", pipelineTag)
 	}
 
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
@@ -329,12 +335,9 @@ func (a *App) PullModel(modelID, targetDevice, pipelineTag string) error {
 		"--source_model", modelID,
 		"--model_repository_path", modelsDir,
 		"--model_name", modelID,
+		"--task", def.PullTask,
+		"--target_device", targetDevice,
 	}
-	task := pipelineTagToTask(pipelineTag)
-	if task == "" {
-		return fmt.Errorf("unsupported pipeline tag %q: must be text-generation or feature-extraction", pipelineTag)
-	}
-	args = append(args, "--task", task, "--target_device", targetDevice)
 
 	cmd := exec.Command(ovmsExe, args...)
 	cmd.Dir = ovmsDirPath
@@ -343,25 +346,30 @@ func (a *App) PullModel(modelID, targetDevice, pipelineTag string) error {
 	if err := a.streamCmd(cmd); err != nil {
 		return err
 	}
-	return a.ovmsAddToConfig(modelID, modelsDir, targetDevice)
+	return a.ovmsAddToConfig(modelID, modelsDir, targetDevice, pipelineTag)
 }
 
 // ExportTextGen exports a text-generation model using export_model.py.
 func (a *App) ExportTextGen(modelID, targetDevice string, extraOpts map[string]any) error {
-	return a.exportWithScript(modelID, targetDevice, "text_generation", extraOpts)
+	return a.exportWithScript(modelID, targetDevice, "text-generation", extraOpts)
 }
 
 // ExportEmbeddings exports an embeddings model using export_model.py.
 func (a *App) ExportEmbeddings(modelID, targetDevice string, extraOpts map[string]any) error {
-	return a.exportWithScript(modelID, targetDevice, "embeddings_ov", extraOpts)
+	return a.exportWithScript(modelID, targetDevice, "feature-extraction", extraOpts)
 }
 
-func (a *App) exportWithScript(modelID, targetDevice, task string, extraOpts map[string]any) error {
+func (a *App) exportWithScript(modelID, targetDevice, pipelineTag string, extraOpts map[string]any) error {
 	if a.config.InstallDir == "" {
 		return fmt.Errorf("install directory is not configured")
 	}
 	if modelID == "" {
 		return fmt.Errorf("no model selected")
+	}
+
+	def, ok := pipelineDefs[pipelineTag]
+	if !ok {
+		return fmt.Errorf("unsupported pipeline tag %q", pipelineTag)
 	}
 
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
@@ -380,7 +388,7 @@ func (a *App) exportWithScript(modelID, targetDevice, task string, extraOpts map
 
 	args := []string{
 		scriptPath,
-		task,
+		def.ExportTask,
 		"--source_model", modelID,
 		"--model_repository_path", modelsDir,
 		"--model_name", modelID,
@@ -410,15 +418,16 @@ func (a *App) exportWithScript(modelID, targetDevice, task string, extraOpts map
 	if err := a.streamCmd(cmd); err != nil {
 		return err
 	}
-	return a.ovmsAddToConfig(modelID, modelsDir, targetDevice)
+	return a.ovmsAddToConfig(modelID, modelsDir, targetDevice, pipelineTag)
 }
 
-func (a *App) ovmsAddToConfig(modelID, modelsDir, targetDevice string) error {
+func (a *App) ovmsAddToConfig(modelID, modelsDir, targetDevice, task string) error {
 	cfgPath := filepath.Join(a.config.InstallDir, "config.json")
 	var cfg OVMSConfig
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		json.Unmarshal(data, &cfg) //nolint: errcheck — start fresh on parse error
 	}
+	a.setModelTask(modelID, task)
 	for i, e := range cfg.ModelConfigList {
 		if e.Config.Name == modelID {
 			if cfg.ModelConfigList[i].Config.TargetDevice != targetDevice {
@@ -710,6 +719,48 @@ type ModelInfo struct {
 	Name         string `json:"name"`
 	BasePath     string `json:"base_path"`
 	TargetDevice string `json:"target_device"`
+	Task         string `json:"task,omitempty"`
+}
+
+// modelMeta holds per-model metadata that is not part of the OVMS config.json.
+type modelMeta struct {
+	Task string `json:"task,omitempty"`
+}
+
+func (a *App) metaPath() string {
+	return filepath.Join(a.config.InstallDir, "model_meta.json")
+}
+
+func (a *App) readModelMeta() map[string]modelMeta {
+	data, err := os.ReadFile(a.metaPath())
+	if err != nil {
+		return map[string]modelMeta{}
+	}
+	var m map[string]modelMeta
+	if err := json.Unmarshal(data, &m); err != nil {
+		return map[string]modelMeta{}
+	}
+	return m
+}
+
+func (a *App) writeModelMeta(m map[string]modelMeta) error {
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(a.metaPath(), data, 0644)
+}
+
+func (a *App) setModelTask(modelID, task string) {
+	m := a.readModelMeta()
+	m[modelID] = modelMeta{Task: task}
+	a.writeModelMeta(m) //nolint: errcheck
+}
+
+func (a *App) deleteModelMeta(modelID string) {
+	m := a.readModelMeta()
+	delete(m, modelID)
+	a.writeModelMeta(m) //nolint: errcheck
 }
 
 // OVMSModelConfig is a single model entry in config.json.
@@ -747,12 +798,14 @@ func (a *App) GetInstalledModels() ([]ModelInfo, error) {
 		return nil, fmt.Errorf("parse config.json: %w", err)
 	}
 
+	meta := a.readModelMeta()
 	models := make([]ModelInfo, 0, len(ovmsConfig.ModelConfigList))
 	for _, item := range ovmsConfig.ModelConfigList {
 		models = append(models, ModelInfo{
 			Name:         item.Config.Name,
 			BasePath:     item.Config.BasePath,
 			TargetDevice: item.Config.TargetDevice,
+			Task:         meta[item.Config.Name].Task,
 		})
 	}
 	return models, nil
@@ -797,6 +850,7 @@ func (a *App) DeleteInstalledModel(modelName string) error {
 	if err := writeOVMSConfig(cfgPath, ovmsConfig); err != nil {
 		return err
 	}
+	a.deleteModelMeta(modelName)
 
 	if !filepath.IsAbs(modelPath) {
 		modelPath = filepath.Join(a.config.InstallDir, modelPath)

@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -119,15 +117,7 @@ func (a *App) apiExport(w http.ResponseWriter, r *http.Request) {
 	}
 	go func() {
 		defer globalJob.busy.Store(false)
-		var err error
-		switch req.Task {
-		case "text-generation":
-			err = a.ExportTextGen(req.ModelID, req.TargetDevice, req.ExtraOpts)
-		case "feature-extraction":
-			err = a.ExportEmbeddings(req.ModelID, req.TargetDevice, req.ExtraOpts)
-		default:
-			err = fmt.Errorf("unsupported task %q", req.Task)
-		}
+		err := a.exportWithScript(req.ModelID, req.TargetDevice, req.Task, req.ExtraOpts)
 		globalJob.mu.Lock()
 		if err != nil {
 			globalJob.lastErr = err.Error()
@@ -179,7 +169,7 @@ func (a *App) apiTestModels(w http.ResponseWriter, _ *http.Request) {
 			payload any
 			mtype   string
 		)
-		if containsFold(m.Name, "embed") {
+		if pipelineDefs[m.Task].IsEmbedding {
 			mtype = "embeddings"
 			url = ovmsBase + "/v3/embeddings"
 			payload = map[string]any{"model": m.Name, "input": "hello"}
@@ -203,9 +193,6 @@ func (a *App) apiTestModels(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
-func containsFold(s, sub string) bool {
-	return len(s) >= len(sub) && strings.Contains(strings.ToLower(s), strings.ToLower(sub))
-}
 
 func apiJobStatus(w http.ResponseWriter, _ *http.Request) {
 	busy := globalJob.busy.Load()

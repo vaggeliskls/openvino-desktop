@@ -9,7 +9,6 @@ import (
 const (
 	ovmsTmpZip = "ovms-tmp.zip"
 	ovmsDir    = "ovms"
-	uvURL      = "https://github.com/turintech/openvino-desktop/releases/download/uv/uv.exe"
 )
 
 // PrepareOVMS downloads and extracts the OVMS server into installDir.
@@ -42,41 +41,39 @@ func PrepareOVMS(installDir, ovmsURL string, log LogFunc) error {
 	return nil
 }
 
-// PrepareExport creates a uv venv using the OVMS-bundled Python and installs
-// the export requirements into it, then writes the .deps-ready marker.
-// uvDownloadURL overrides the default uv.exe download URL when non-empty.
+// PrepareExport creates a uv venv and installs the export requirements into it,
+// then writes the .deps-ready marker.
+// uvDownloadURL overrides the default uv download URL when non-empty.
 func PrepareExport(installDir, uvDownloadURL string, log LogFunc) error {
-	uvExe := filepath.Join(installDir, "uv.exe")
-	ovmsPython := filepath.Join(installDir, ovmsDir, "python", "python.exe")
+	uvExe := UVExePath(installDir)
+	ovmsPython := OVMSPythonPath(installDir)
 	requirementsPath := filepath.Join(installDir, "export-model-requirements", "requirements.txt")
 
-	downloadURL := uvURL
+	downloadURL := DefaultUVURL()
 	if uvDownloadURL != "" {
 		downloadURL = uvDownloadURL
 	}
 
 	if _, err := os.Stat(uvExe); err != nil {
 		log("Downloading uv...")
-		if err := downloadFile(downloadURL, uvExe); err != nil {
-			return fmt.Errorf("download uv.exe: %w", err)
+		if err := downloadUVBinary(downloadURL, uvExe); err != nil {
+			return fmt.Errorf("download uv: %w", err)
 		}
 	}
 	if _, err := os.Stat(ovmsPython); err != nil {
-		return fmt.Errorf("OVMS python not found at %s — run Prepare OVMS first", ovmsPython)
+		return fmt.Errorf("python not found at %s — run Prepare OVMS first", ovmsPython)
 	}
 	if _, err := os.Stat(requirementsPath); err != nil {
 		return fmt.Errorf("requirements.txt not found at %s", requirementsPath)
 	}
 
 	venvDir := filepath.Join(installDir, "export")
-	log("Creating export venv using OVMS Python...")
-	// uv venv <installDir>/export --python <installDir>/ovms/python/python.exe
+	log("Creating export venv...")
 	if err := RunScript(installDir, log, uvExe, "venv", venvDir, "--python", ovmsPython); err != nil {
 		return fmt.Errorf("uv venv: %w", err)
 	}
 
 	log("Installing export dependencies...")
-	// uv pip install --python <installDir>/ovms/python/python.exe -r <installDir>/export-model-requirements/requirements.txt
 	if err := RunScript(installDir, log, uvExe, "pip", "install", "--python", ovmsPython, "-r", requirementsPath); err != nil {
 		return fmt.Errorf("uv pip install: %w", err)
 	}

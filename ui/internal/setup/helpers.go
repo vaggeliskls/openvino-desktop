@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -105,14 +106,28 @@ func unzip(zipPath, destDir string) error {
 	return cmd.Run()
 }
 
-// removeDir deletes a directory tree using rd /s /q (fast native Windows deletion).
+// removeDir deletes a directory tree cross-platform.
 func removeDir(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
+	return os.RemoveAll(path)
+}
+
+// downloadUVBinary downloads the uv binary to destPath.
+// On Linux the release is a .tar.gz archive; the binary is extracted from it.
+// On other platforms the URL points directly to the executable.
+func downloadUVBinary(downloadURL, destPath string) error {
+	if runtime.GOOS == "linux" {
+		tmpPath := destPath + ".tar.gz"
+		if err := downloadFile(downloadURL, tmpPath); err != nil {
+			return err
+		}
+		defer os.Remove(tmpPath)
+		cmd := exec.Command("tar", "-xzf", tmpPath, "--strip-components=1", "-C", filepath.Dir(destPath))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("extract uv: %w: %s", err, out)
+		}
+		return os.Chmod(destPath, 0755)
 	}
-	cmd := exec.Command("cmd", "/c", "rd", "/s", "/q", path)
-	hideWindow(cmd)
-	return cmd.Run()
+	return downloadFile(downloadURL, destPath)
 }
 
 // RunScript runs an arbitrary command in workDir, streaming output via log.

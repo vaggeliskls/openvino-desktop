@@ -18,14 +18,12 @@ import (
 	"sync"
 	"time"
 
+	goruntime "runtime"
+
 	"github.com/turintech/openvino-desktop/ui/internal/setup"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const (
-	defaultOvmsURL = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.0/ovms_windows_python_on.zip"
-	defaultUvURL   = "https://github.com/turintech/openvino-desktop/releases/download/uv/uv.exe"
-)
 
 // Config holds user-configurable settings.
 var defaultSearchTags = []string{"OpenVINO", "Qwen", "Embedding"}
@@ -124,8 +122,8 @@ func configPath() string {
 func defaultConfig() Config {
 	return Config{
 		InstallDir:             defaultInstallDir(),
-		OvmsURL:                defaultOvmsURL,
-		UvURL:                  defaultUvURL,
+		OvmsURL:                setup.DefaultOVMSURL(),
+		UvURL:                  setup.DefaultUVURL(),
 		SearchTags:             defaultSearchTags,
 		PipelineFilters:        defaultPipelineFilters,
 		SearchLimit:            30,
@@ -148,10 +146,10 @@ func (a *App) loadConfig() {
 		return
 	}
 	if a.config.OvmsURL == "" {
-		a.config.OvmsURL = defaultOvmsURL
+		a.config.OvmsURL = setup.DefaultOVMSURL()
 	}
 	if a.config.UvURL == "" {
-		a.config.UvURL = defaultUvURL
+		a.config.UvURL = setup.DefaultUVURL()
 	}
 	if len(a.config.SearchTags) == 0 {
 		a.config.SearchTags = defaultSearchTags
@@ -198,7 +196,7 @@ func (a *App) SaveConfig(config Config) error {
 // GetAvailableDevices returns the OpenVINO devices visible to the bundled Python.
 func (a *App) GetAvailableDevices() []string {
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	pythonExe := filepath.Join(ovmsDirPath, "python", "python.exe")
+	pythonExe := setup.OVMSPythonPath(a.config.InstallDir)
 	if _, err := os.Stat(pythonExe); err != nil {
 		return []string{"CPU", "GPU", "NPU", "AUTO"}
 	}
@@ -321,10 +319,10 @@ func (a *App) PullModel(modelID, targetDevice, pipelineTag string) error {
 	}
 
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
+	ovmsExe := filepath.Join(ovmsDirPath, "ovms"+setup.ExeSuffix())
 
 	if _, err := os.Stat(ovmsExe); err != nil {
-		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
+		return fmt.Errorf("ovms not found at %s", ovmsExe)
 	}
 
 	modelsDir := filepath.Join(a.config.InstallDir, "models")
@@ -373,7 +371,7 @@ func (a *App) exportWithScript(modelID, targetDevice, pipelineTag string, extraO
 	}
 
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	pythonExe := filepath.Join(ovmsDirPath, "python", "python.exe")
+	pythonExe := setup.OVMSPythonPath(a.config.InstallDir)
 	scriptPath := filepath.Join(a.config.InstallDir, "export-model-requirements", "export_model.py")
 
 	if _, err := os.Stat(pythonExe); err != nil {
@@ -560,16 +558,11 @@ func writeOVMSConfig(cfgPath string, cfg OVMSConfig) error {
 }
 
 // ResetOVMS removes the OVMS server directory and the deps-ready marker.
-// Uses rd /s /q for fast native Windows deletion.
 func (a *App) ResetOVMS() error {
 	a.stopAndWait()
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	if _, err := os.Stat(ovmsDirPath); err == nil {
-		rmCmd := exec.Command("cmd", "/c", "rd", "/s", "/q", ovmsDirPath)
-		hideWindow(rmCmd)
-		if err := rmCmd.Run(); err != nil {
-			return fmt.Errorf("remove ovms: %w", err)
-		}
+	if err := os.RemoveAll(ovmsDirPath); err != nil {
+		return fmt.Errorf("remove ovms: %w", err)
 	}
 	for _, name := range []string{".deps-ready", "config.json", "model_meta.json"} {
 		path := filepath.Join(a.config.InstallDir, name)
@@ -594,8 +587,17 @@ func (a *App) PrepareOVMS() error {
 	return setup.PrepareExport(a.config.InstallDir, a.config.UvURL, a.emit)
 }
 
-// buildOVMSEnv constructs the process environment for running ovms.exe.
+// buildOVMSEnv constructs the process environment for running ovms.
 func buildOVMSEnv(ovmsDir string) []string {
+	if goruntime.GOOS == "linux" {
+		libPath := filepath.Join(ovmsDir, "lib")
+		if existing := os.Getenv("LD_LIBRARY_PATH"); existing != "" {
+			libPath += ":" + existing
+		}
+		return append(os.Environ(), "LD_LIBRARY_PATH="+libPath)
+	}
+
+	// Windows: prepend OVMS and bundled Python dirs to PATH.
 	var prepend []string
 	pythonDir := filepath.Join(ovmsDir, "python")
 	if _, err := os.Stat(pythonDir); err == nil {
@@ -648,10 +650,10 @@ func (a *App) StartOVMS() error {
 	}
 
 	ovmsDirPath := filepath.Join(a.config.InstallDir, "ovms")
-	ovmsExe := filepath.Join(ovmsDirPath, "ovms.exe")
+	ovmsExe := filepath.Join(ovmsDirPath, "ovms"+setup.ExeSuffix())
 	ovmsCfg := filepath.Join(a.config.InstallDir, "config.json")
 	if _, err := os.Stat(ovmsExe); err != nil {
-		return fmt.Errorf("ovms.exe not found at %s", ovmsExe)
+		return fmt.Errorf("ovms not found at %s", ovmsExe)
 	}
 
 	modelsDir := filepath.Join(a.config.InstallDir, "models")

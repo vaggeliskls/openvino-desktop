@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel, GetAvailableDevices, Chat } from '../wailsjs/go/main/App'
+import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, ResetModels, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel, GetAvailableDevices, Chat } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
 const PROGRESS_MAP = {
@@ -248,6 +248,20 @@ export default function App() {
       return
     }
     await runSetup()
+  }
+
+  const handleResetModels = async () => {
+    if (!window.confirm('This will delete the models folder and all config JSON files. Continue?')) return
+    setRunning(true)
+    setError(null)
+    try {
+      await ResetModels()
+      setInstalledModels([])
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setRunning(false)
+    }
   }
 
   const loadInstalledModels = () => {
@@ -767,6 +781,9 @@ export default function App() {
             </label>
 
             <div className="reset-row">
+              <button className="btn-reset" disabled={running} onClick={handleResetModels}>
+                Reset Models
+              </button>
               <button className="btn-reset" disabled={running} onClick={handleReset}>
                 Reset OVMS
               </button>

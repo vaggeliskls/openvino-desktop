@@ -342,7 +342,7 @@ export default function App() {
           })}
         </nav>
         <div className="status-row header-status">
-          <StatusBadge ready={status.ovms_ready && status.deps_ready} label={status.ovms_version ? `OVMS ${status.ovms_version}` : 'OVMS'} />
+          <StatusBadge ready={serverRunning} label={status.ovms_version ? `OVMS ${status.ovms_version}` : 'OVMS'} />
         </div>
       </header>
 
@@ -654,7 +654,7 @@ export default function App() {
               </div>
 
               <div className="field">
-                <label>uv Download URL</label>
+                <label>UV Download URL</label>
                 <input
                   value={config.uv_url}
                   onChange={e => setConfig(c => ({ ...c, uv_url: e.target.value }))}

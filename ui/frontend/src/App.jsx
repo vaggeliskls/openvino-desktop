@@ -324,6 +324,14 @@ export default function App() {
             <div className="progress-fill" style={{ width: `${progress}%` }} />
           </div>
           <div className="progress-label">{progress > 0 ? `${progress}%` : ''}</div>
+          {import.meta.env.DEV && logs.length > 0 && (
+            <div className="log-box loading-log">
+              {logs.map((line, i) => (
+                <div key={i} className={line.startsWith('---') ? 'log-done' : 'log-line'}>{line}</div>
+              ))}
+              <div ref={initLogsEndRef} />
+            </div>
+          )}
           {initError && (
             <>
               <div className="error">{initError}</div>

@@ -26,6 +26,8 @@ export function PrepareOVMS():Promise<void>;
 
 export function PullModel(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function ResetModels():Promise<void>;
+
 export function ResetOVMS():Promise<void>;
 
 export function SaveConfig(arg1:main.Config):Promise<void>;

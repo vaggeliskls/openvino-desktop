@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel, GetAvailableDevices, Chat } from '../wailsjs/go/main/App'
+import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, ResetModels, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel, GetAvailableDevices, Chat } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
 const PROGRESS_MAP = {
@@ -250,6 +250,20 @@ export default function App() {
     await runSetup()
   }
 
+  const handleResetModels = async () => {
+    if (!window.confirm('This will delete the models folder and all config JSON files. Continue?')) return
+    setRunning(true)
+    setError(null)
+    try {
+      await ResetModels()
+      setInstalledModels([])
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setRunning(false)
+    }
+  }
+
   const loadInstalledModels = () => {
     GetInstalledModels()
       .then(models => setInstalledModels(models || []))
@@ -342,7 +356,7 @@ export default function App() {
           })}
         </nav>
         <div className="status-row header-status">
-          <StatusBadge ready={status.ovms_ready && status.deps_ready} label={status.ovms_version ? `OVMS ${status.ovms_version}` : 'OVMS'} />
+          <StatusBadge ready={serverRunning} label={status.ovms_version ? `OVMS ${status.ovms_version}` : 'OVMS'} />
         </div>
       </header>
 
@@ -654,7 +668,7 @@ export default function App() {
               </div>
 
               <div className="field">
-                <label>uv Download URL</label>
+                <label>UV Download URL</label>
                 <input
                   value={config.uv_url}
                   onChange={e => setConfig(c => ({ ...c, uv_url: e.target.value }))}
@@ -767,6 +781,9 @@ export default function App() {
             </label>
 
             <div className="reset-row">
+              <button className="btn-reset" disabled={running} onClick={handleResetModels}>
+                Reset Models
+              </button>
               <button className="btn-reset" disabled={running} onClick={handleReset}>
                 Reset OVMS
               </button>

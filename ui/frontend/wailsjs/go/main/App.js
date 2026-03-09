@@ -50,6 +50,10 @@ export function PullModel(arg1, arg2, arg3) {
   return window['go']['main']['App']['PullModel'](arg1, arg2, arg3);
 }
 
+export function ResetModels() {
+  return window['go']['main']['App']['ResetModels']();
+}
+
 export function ResetOVMS() {
   return window['go']['main']['App']['ResetOVMS']();
 }

@@ -455,7 +455,7 @@ func (a *App) ovmsAddToConfig(modelID, modelsDir, targetDevice, task string) err
 				if err := writeOVMSConfig(cfgPath, cfg); err != nil {
 					return err
 				}
-				a.restartOVMSIfRunning()
+				a.restartOVMS()
 			}
 			return nil
 		}
@@ -471,7 +471,7 @@ func (a *App) ovmsAddToConfig(modelID, modelsDir, targetDevice, task string) err
 	if err := writeOVMSConfig(cfgPath, cfg); err != nil {
 		return err
 	}
-	a.restartOVMSIfRunning()
+	a.restartOVMS()
 	return nil
 }
 
@@ -510,6 +510,12 @@ func (a *App) restartOVMSIfRunning() {
 	if !running {
 		return
 	}
+	a.stopAndWait()
+	a.StartOVMS() //nolint: errcheck
+}
+
+// restartOVMS stops OVMS if running then starts it unconditionally.
+func (a *App) restartOVMS() {
 	a.stopAndWait()
 	a.StartOVMS() //nolint: errcheck
 }

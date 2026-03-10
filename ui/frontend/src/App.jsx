@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, ResetModels, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel, GetAvailableDevices, Chat } from '../wailsjs/go/main/App'
+import { GetConfig, SaveConfig, PrepareOVMS, ResetOVMS, ResetModels, CheckStatus, GetStartupEnabled, SetStartup, SearchModels, ExportTextGen, ExportEmbeddings, PullModel, StartOVMS, StopOVMS, IsOVMSRunning, GetInstalledModels, DeleteInstalledModel, GetAvailableDevices, Chat, GetPipelineFilters } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
 const PROGRESS_MAP = {
@@ -35,7 +35,6 @@ export default function App() {
     embeddings_target_device: 'CPU',
   })
   const [newTag, setNewTag] = useState('')
-  const [newFilter, setNewFilter] = useState('')
   const [saved, setSaved] = useState(false)
   const [startup, setStartup] = useState(false)
   const [status, setStatus] = useState(null)
@@ -59,6 +58,7 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [selectedModel, setSelectedModel] = useState('')
+  const [pipelineFilters, setPipelineFilters] = useState([])
   const [activeFilters, setActiveFilters] = useState(null)
   const [installedModels, setInstalledModels] = useState([])
   const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -103,9 +103,10 @@ export default function App() {
     if (startupRan.current) return
     startupRan.current = true
 
-    Promise.all([GetConfig(), GetStartupEnabled()]).then(([cfg, su]) => {
+    Promise.all([GetConfig(), GetStartupEnabled(), GetPipelineFilters()]).then(([cfg, su, filters]) => {
       setConfig(cfg)
-      setActiveFilters(cfg.pipeline_filters || [])
+      setPipelineFilters(filters || [])
+      setActiveFilters(filters || [])
       setStartup(su)
     })
 
@@ -451,9 +452,9 @@ export default function App() {
                         <button key={tag} className="search-tag" onClick={() => quickSearch(tag)}>{tag}</button>
                       ))}
                     </div>
-                    {(config.pipeline_filters || []).length > 0 && (
+                    {pipelineFilters.length > 0 && (
                       <div className="filter-chips">
-                        {(config.pipeline_filters || []).map(f => {
+                        {pipelineFilters.map(f => {
                           const active = (activeFilters || []).includes(f)
                           return (
                             <button
@@ -746,31 +747,6 @@ export default function App() {
                 />
               </div>
               <small>Clickable shortcuts on the Export search. Press Enter to add.</small>
-            </div>
-
-            <div className="field">
-              <label>Pipeline Filters</label>
-              <div className="tag-editor">
-                {(config.pipeline_filters || []).map(f => (
-                  <span key={f} className="tag-pill">
-                    {f}
-                    <button onClick={() => setConfig(c => ({ ...c, pipeline_filters: c.pipeline_filters.filter(x => x !== f) }))}>×</button>
-                  </span>
-                ))}
-                <input
-                  className="tag-input"
-                  value={newFilter}
-                  onChange={e => setNewFilter(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && newFilter.trim()) {
-                      setConfig(c => ({ ...c, pipeline_filters: [...(c.pipeline_filters || []), newFilter.trim()] }))
-                      setNewFilter('')
-                    }
-                  }}
-                  placeholder="Add filter…"
-                />
-              </div>
-              <small>Restrict searches to these Hugging Face pipeline types. Press Enter to add.</small>
             </div>
 
             <label className="toggle-row">

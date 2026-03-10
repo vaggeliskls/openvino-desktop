@@ -17,6 +17,8 @@ var webAssets embed.FS
 var embeddedAssets embed.FS
 
 func main() {
+	ensureSingleInstance()
+
 	app := NewApp(embeddedAssets)
 
 	err := wails.Run(&options.App{

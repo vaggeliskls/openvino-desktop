@@ -447,25 +447,33 @@ export default function App() {
 
                   <div className="search-section">
                     <h3>Hugging face models</h3>
-                    <div className="search-tags">
-                      {(config.search_tags || []).map(tag => (
-                        <button key={tag} className="search-tag" onClick={() => quickSearch(tag)}>{tag}</button>
-                      ))}
-                    </div>
+                    {(config.search_tags || []).length > 0 && (
+                      <div className="filter-group">
+                        <span className="filter-label">Quick search</span>
+                        <div className="search-tags">
+                          {(config.search_tags || []).map(tag => (
+                            <button key={tag} className="search-tag" onClick={() => quickSearch(tag)}>{tag}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {pipelineFilters.length > 0 && (
-                      <div className="filter-chips">
-                        {pipelineFilters.map(f => {
-                          const active = (activeFilters || []).includes(f)
-                          return (
-                            <button
-                              key={f}
-                              className={`filter-chip ${active ? 'active' : ''}`}
-                              onClick={() => toggleFilter(f)}
-                            >
-                              {f}
-                            </button>
-                          )
-                        })}
+                      <div className="filter-group">
+                        <span className="filter-label">Filter by type</span>
+                        <div className="filter-chips">
+                          {pipelineFilters.map(f => {
+                            const active = (activeFilters || []).includes(f)
+                            return (
+                              <button
+                                key={f}
+                                className={`filter-chip ${active ? 'active' : ''}`}
+                                onClick={() => toggleFilter(f)}
+                              >
+                                {f}
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
                     )}
                     <div className="search-row">

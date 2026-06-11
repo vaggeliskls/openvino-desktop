@@ -14,5 +14,5 @@ sentence_transformers
 sentencepiece
 timm==1.0.25
 torchvision
-torch==2.9.1+cpu
+torch==2.12.0+cpu
 transformers<4.58

@@ -38,6 +38,10 @@ export function GetInstalledModels() {
   return window['go']['main']['App']['GetInstalledModels']();
 }
 
+export function GetOVMSRuntimeStatus() {
+  return window['go']['main']['App']['GetOVMSRuntimeStatus']();
+}
+
 export function GetPipelineFilters() {
   return window['go']['main']['App']['GetPipelineFilters']();
 }
@@ -94,6 +98,6 @@ export function StopOVMS() {
   return window['go']['main']['App']['StopOVMS']();
 }
 
-export function UpdateOVMSToLatest() {
-  return window['go']['main']['App']['UpdateOVMSToLatest']();
+export function UpdateOVMSToLatest(arg1) {
+  return window['go']['main']['App']['UpdateOVMSToLatest'](arg1);
 }

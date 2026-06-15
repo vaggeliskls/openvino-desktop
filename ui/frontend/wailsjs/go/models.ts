@@ -102,10 +102,23 @@ export namespace main {
 	        this.task = source["task"];
 	    }
 	}
+	export class OVMSRuntimeStatus {
+	    ready: boolean;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OVMSRuntimeStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ready = source["ready"];
+	        this.version = source["version"];
+	    }
+	}
 	export class StatusResult {
 	    deps_ready: boolean;
 	    ovms_ready: boolean;
-	    ovms_version: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new StatusResult(source);
@@ -115,7 +128,6 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.deps_ready = source["deps_ready"];
 	        this.ovms_ready = source["ovms_ready"];
-	        this.ovms_version = source["ovms_version"];
 	    }
 	}
 	export class UpdateInfo {

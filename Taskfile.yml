@@ -21,7 +21,7 @@ tasks:
     cmds:
       - ./{{.UV_BIN}} python install 3.12.12 --install-dir ./python
       - ./{{.UV_BIN}} venv export --python ./python/cpython-3.12.12-windows-x86_64-none/python.exe --relocatable
-      - ./{{.UV_BIN}} pip install --python {{.PYTHON}} -r ui/assets/export-model-requirements/requirements.txt
+      - ./{{.UV_BIN}} pip install --python {{.PYTHON}} --index-strategy unsafe-best-match -r ui/assets/export-model-requirements/requirements.txt
 
   export:
     desc: Run model export script (pass args with -- <args>)
@@ -37,7 +37,7 @@ tasks:
     desc: Download and extract OVMS server
     cmds:
       - rm -rf ovms
-      - curl -L https://github.com/openvinotoolkit/model_server/releases/download/v2026.1/ovms_windows_python_on.zip -o ovms-tmp.zip
+      - curl -L https://github.com/openvinotoolkit/model_server/releases/download/v2026.2/ovms_windows_2026.2.0_python_on.zip -o ovms-tmp.zip
       - tar -xf ovms-tmp.zip
       - rm -f ovms-tmp.zip
 

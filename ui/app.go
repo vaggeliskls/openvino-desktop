@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	defaultOvmsURL = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.1/ovms_windows_2026.1.0_python_on.zip"
+	defaultOvmsURL = "https://github.com/openvinotoolkit/model_server/releases/download/v2026.2/ovms_windows_2026.2.0_python_on.zip"
 	defaultUvURL   = "https://github.com/turintech/openvino-desktop/releases/download/uv/uv.exe"
 )
 
@@ -57,7 +57,7 @@ type StatusResult struct {
 }
 
 // ovmsVersionFromURL extracts the version from the OVMS download URL filename.
-// e.g. "ovms_windows_2026.1.0_python_on.zip" → "2026.1.0"
+// e.g. "ovms_windows_2026.2.0_python_on.zip" → "2026.2.0"
 func ovmsVersionFromURL(rawURL string) string {
 	base := path.Base(rawURL)
 	const prefix = "ovms_windows_"

@@ -20,6 +20,8 @@ export function GetConfig():Promise<main.Config>;
 
 export function GetInstalledModels():Promise<Array<main.ModelInfo>>;
 
+export function GetOVMSRuntimeStatus():Promise<main.OVMSRuntimeStatus>;
+
 export function GetPipelineFilters():Promise<Array<string>>;
 
 export function GetStartupEnabled():Promise<boolean>;
@@ -48,4 +50,4 @@ export function StartOVMS():Promise<void>;
 
 export function StopOVMS():Promise<void>;
 
-export function UpdateOVMSToLatest():Promise<void>;
+export function UpdateOVMSToLatest(arg1:string):Promise<void>;

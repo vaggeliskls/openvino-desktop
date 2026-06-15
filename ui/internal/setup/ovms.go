@@ -76,8 +76,11 @@ func PrepareExport(installDir, uvDownloadURL string, log LogFunc) error {
 	}
 
 	log("Installing export dependencies...")
-	// uv pip install --python <installDir>/ovms/python/python.exe -r <installDir>/export-model-requirements/requirements.txt
-	if err := RunScript(installDir, log, uvExe, "pip", "install", "--python", ovmsPython, "-r", requirementsPath); err != nil {
+	// uv pip install --python <installDir>/ovms/python/python.exe --index-strategy unsafe-best-match -r <installDir>/export-model-requirements/requirements.txt
+	// unsafe-best-match lets uv pick the best version across all indexes (PyTorch CPU + PyPI),
+	// matching pip's default behaviour. Required so deps like requests resolve from PyPI rather
+	// than being pinned to the older version published on the PyTorch index.
+	if err := RunScript(installDir, log, uvExe, "pip", "install", "--python", ovmsPython, "--index-strategy", "unsafe-best-match", "-r", requirementsPath); err != nil {
 		return fmt.Errorf("uv pip install: %w", err)
 	}
 
